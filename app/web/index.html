@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>反诈护盾实验室</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <!-- ═══ 登录遮罩层 ═══ -->
+    <div id="auth-overlay" class="auth-overlay">
+      <div class="auth-panel card reveal" style="--delay: 20ms">
+        <div class="auth-brand">
+          <p class="eyebrow">Anti-Fraud Lab</p>
+          <h1>反诈护盾实验室</h1>
+          <p class="auth-subtitle">一站式反诈科普 · 实时劝阻 · AI 智能研判 · 情景闯关</p>
+        </div>
+
+        <div class="auth-tabs">
+          <button class="auth-tab active" data-tab="login" type="button">登录</button>
+          <button class="auth-tab" data-tab="register" type="button">注册</button>
+        </div>
+
+        <div id="auth-error" class="auth-error" style="display:none"></div>
+
+        <!-- ── 登录表单 ── -->
+        <form id="login-form" class="auth-form">
+          <label class="full">
+            用户名
+            <input type="text" id="login-username" required placeholder="请输入用户名" autocomplete="username" />
+          </label>
+          <label class="full">
+            密码
+            <input type="password" id="login-password" required placeholder="请输入密码" autocomplete="current-password" />
+          </label>
+          <button type="submit" class="full auth-submit-btn">登 录</button>
+          <p class="auth-switch">还没有账号？<a href="#" data-switch-tab="register">去注册</a></p>
+        </form>
+
+        <!-- ── 注册表单 ── -->
+        <form id="register-form" class="auth-form" style="display:none">
+          <label class="full">
+            用户名
+            <input type="text" id="reg-username" required placeholder="3-32位字符" autocomplete="username" />
+          </label>
+          <label class="full">
+            密码
+            <input type="password" id="reg-password" required placeholder="至少6位" autocomplete="new-password" />
+            <span id="pwd-strength" class="pwd-strength"></span>
+          </label>
+          <label class="full">
+            确认密码
+            <input type="password" id="reg-password-confirm" required placeholder="再次输入密码" autocomplete="new-password" />
+          </label>
+          <label class="full">
+            角色
+            <select id="reg-role">
+              <option value="general">普通用户</option>
+              <option value="student">学生</option>
+            </select>
+          </label>
+          <label class="full">
+            昵称（可选）
+            <input type="text" id="reg-nickname" placeholder="显示名称" maxlength="32" />
+          </label>
+          <button type="submit" class="full auth-submit-btn">注 册</button>
+          <p class="auth-switch">已有账号？<a href="#" data-switch-tab="login">去登录</a></p>
+        </form>
+      </div>
+    </div>
+
+    <!-- ═══ 已登录后的主界面 ═══ -->
+    <div id="app-main" style="display:none">
+      <!-- 顶部导航栏 -->
+      <nav class="top-nav glass-card" id="top-nav">
+        <div class="nav-left">
+          <span class="nav-logo">🛡️ 反诈护盾</span>
+          <span class="nav-welcome" id="nav-welcome">欢迎，用户</span>
+          <span class="nav-badge" id="nav-badge"></span>
+        </div>
+        <div class="nav-right">
+          <button id="nav-logout" class="nav-logout-btn" type="button">退出登录</button>
+        </div>
+      </nav>
+
+      <div class="bg-layer"></div>
+
+      <header class="hero card reveal" style="--delay: 20ms">
+        <p class="eyebrow">Anti-Fraud Lab</p>
+        <h1>反诈护盾实验室</h1>
+        <p class="hero-text">
+          一站式完成反诈问答、实时劝阻、可疑举报、AI 智能研判与情景闯关。
+        </p>
+        <div class="legend" id="health-indicator">系统状态检测中...</div>
+      </header>
+
+      <main class="layout">
+        <!-- ── AI 反诈助手 ── -->
+        <section class="card ai-chat-section reveal" style="--delay: 40ms">
+          <h2>🤖 AI 反诈助手 <span class="ai-badge">DeepSeek R1</span></h2>
+          <div class="chat-container" id="ai-chat-messages">
+            <div class="ai-msg-bubble ai-assistant">
+              <div class="bubble-avatar">🤖</div>
+              <div class="bubble-content">
+                你好！我是 AI 反诈助手。你可以问我任何关于诈骗识别、防骗知识的问题。比如：
+                <ul style="margin:6px 0;padding-left:18px;font-size:13px;color:var(--ink-1)">
+                  <li>"AI换脸诈骗怎么识别？"</li>
+                  <li>"刷单返利为什么不能信？"</li>
+                  <li>"收到冒充公检法的电话怎么办？"</li>
+                  <li>"帮我分析这段话是不是诈骗：...""</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+          <form id="ai-chat-form" class="ai-input-area">
+            <textarea id="ai-chat-input" rows="2" placeholder="输入你的问题..." maxlength="2000"></textarea>
+            <button type="submit" id="ai-send-btn" class="ai-send-btn">发送 ↵</button>
+          </form>
+          <div id="ai-status" class="ai-status muted" style="display:none"></div>
+        </section>
+
+        <!-- 智能对话研判 -->
+        <section class="card reveal" style="--delay: 60ms">
+          <h2>智能对话研判</h2>
+          <form id="chat-form" class="form-grid">
+            <label>
+              当前用户
+              <input type="text" id="chat-user-id" value="" required readonly class="readonly-field" />
+            </label>
+            <label>
+              用户角色
+              <select id="chat-role">
+                <option value="student">student</option>
+                <option value="general" selected>general</option>
+              </select>
+            </label>
+            <label>
+              风险容忍度
+              <select id="chat-risk-tolerance">
+                <option value="low">low</option>
+                <option value="medium" selected>medium</option>
+                <option value="high">high</option>
+              </select>
+            </label>
+            <label>
+              情绪
+              <select id="chat-emotion">
+                <option value="">none</option>
+                <option value="positive">positive</option>
+                <option value="neutral" selected>neutral</option>
+                <option value="negative">negative</option>
+                <option value="anxious">anxious</option>
+              </select>
+            </label>
+            <label class="full">
+              对话内容
+              <textarea id="chat-message" rows="4" required>有人说我账户异常，要求我转到安全账户并提供验证码。</textarea>
+            </label>
+            <button type="submit" class="full">开始研判</button>
+          </form>
+          <div id="chat-output" class="output muted">等待提交...</div>
+        </section>
+
+        <!-- 可疑链接/内容举报 -->
+        <section class="card reveal" style="--delay: 100ms">
+          <h2>可疑链接/内容举报</h2>
+          <form id="report-form" class="form-grid">
+            <label>
+              当前用户
+              <input type="text" id="report-user-id" value="" required readonly class="readonly-field" />
+            </label>
+            <label class="full">
+              可疑 URL
+              <input
+                type="text"
+                id="report-url"
+                placeholder="http://xn--example-xx.top/login@notice"
+                value="http://xn--secure-bank-5k9f.top/login@notice"
+              />
+            </label>
+            <label class="full">
+              可疑内容
+              <textarea id="report-content" rows="3">点击领取返利，先转账再提现。</textarea>
+            </label>
+            <button type="submit" class="full">一键举报并初判</button>
+          </form>
+          <div id="report-output" class="output muted">等待提交...</div>
+        </section>
+
+        <!-- 典型骗局情景闯关 -->
+        <section class="card reveal" style="--delay: 140ms">
+          <h2>典型骗局情景闯关</h2>
+          <div class="form-grid">
+            <label>
+              当前用户
+              <input type="text" id="scenario-user-id" value="" required readonly class="readonly-field" />
+            </label>
+            <label>
+              选择关卡
+              <select id="scenario-select"></select>
+            </label>
+            <button id="scenario-refresh" type="button">刷新关卡</button>
+            <button id="scenario-start" type="button">开始闯关</button>
+          </div>
+          <div id="scenario-stage" class="output muted">请先刷新并开始关卡。</div>
+        </section>
+
+        <!-- 积分排行榜 -->
+        <section class="card leaderboard-section reveal" style="--delay: 160ms">
+          <h2>🏆 积分排行榜</h2>
+          <div class="leaderboard-controls">
+            <button id="leaderboard-refresh" type="button">刷新排行</button>
+            <span class="leaderboard-hint">Top 20 实时排名</span>
+          </div>
+          <div id="leaderboard-table" class="leaderboard-table muted">加载中...</div>
+        </section>
+
+        <!-- 用户积分与勋章 -->
+        <section class="card reveal" style="--delay: 180ms">
+          <h2>我的积分与勋章</h2>
+          <div class="form-grid">
+            <label>
+              当前用户
+              <input type="text" id="progress-user-id" value="" required readonly class="readonly-field" />
+            </label>
+            <label>
+              历史条数
+              <input type="number" id="reports-limit" value="5" min="1" max="20" />
+            </label>
+            <label>
+              开始时间
+              <input type="datetime-local" id="reports-start-at" />
+            </label>
+            <label>
+              结束时间
+              <input type="datetime-local" id="reports-end-at" />
+            </label>
+            <div class="report-actions full">
+              <button id="progress-fetch" type="button">查询进度</button>
+              <button id="reports-fetch" type="button">查询历史举报</button>
+              <button id="reports-export-csv" type="button" disabled>导出 CSV</button>
+              <button id="reports-export-json" type="button" disabled>导出 JSON</button>
+            </div>
+          </div>
+          <div id="progress-output" class="output muted">等待查询...</div>
+          <div id="reports-output" class="output muted">等待查询历史举报...</div>
+        </section>
+
+        <!-- 反诈知识速览 -->
+        <section class="card reveal" style="--delay: 220ms">
+          <h2>反诈知识速览与训练建议</h2>
+          <div class="form-grid">
+            <button id="knowledge-refresh" type="button">刷新知识速览</button>
+            <button id="knowledge-random-scenario" type="button">推荐练习关卡</button>
+          </div>
+          <div id="knowledge-output" class="output muted">等待加载知识速览...</div>
+        </section>
+      </main>
+
+      <footer class="footer">
+        <p>反诈护盾实验室 - FastAPI Demo UI | Powered by DeepSeek R1:1.5b</p>
+      </footer>
+    </div>
+
+    <script src="/static/app.js"></script>
+  </body>
+</html>
