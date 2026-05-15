@@ -237,7 +237,7 @@ def get_me(authorization: str | None = Header(default=None)) -> UserInfoResponse
     user = auth_service.get_current_user(token)
     if not user:
         raise HTTPException(status_code=401, detail="令牌无效或已过期")
-    return UserInfoResponse.model_validate(user)
+    return UserInfoResponse.model_validate({**user, "user_id": user["id"]})
 
 
 # ── 排行榜 ──

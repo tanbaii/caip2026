@@ -12,7 +12,7 @@ class UserProfile(BaseModel):
 
 
 class ChatRequest(BaseModel):
-    user_id: int = Field(min_length=1, max_length=64)
+    user_id: int = Field(ge=1)
     message: str = Field(min_length=1, max_length=1000)
     channel: Literal["web", "miniapp", "mobile", "voice"] = "web"
     emotion: Literal["positive", "neutral", "negative", "anxious"] | None = None
@@ -35,7 +35,7 @@ class ChatResponse(BaseModel):
 
 
 class ReportRequest(BaseModel):
-    user_id: int = Field(min_length=1, max_length=64)
+    user_id: int = Field(ge=1)
     url: str | None = Field(default=None, max_length=2048)
     content: str | None = Field(default=None, max_length=2000)
     channel: Literal["web", "miniapp", "mobile"] = "web"
@@ -91,7 +91,7 @@ class ScenarioSummary(BaseModel):
 
 
 class ScenarioStartRequest(BaseModel):
-    user_id: int = Field(min_length=1, max_length=64)
+    user_id: int = Field(ge=1)
     scenario_id: str = Field(min_length=1, max_length=16)
 
 
@@ -104,7 +104,7 @@ class ScenarioStartResponse(BaseModel):
 
 
 class ScenarioAnswerRequest(BaseModel):
-    user_id: int = Field(min_length=1, max_length=64)
+    user_id: int = Field(ge=1)
     option_index: int = Field(ge=0)
 
 
