@@ -22,6 +22,12 @@ function prefixProxy() {
   return {
     target: backendTarget,
     changeOrigin: true,
+    bypass(req) {
+      if (req.method === 'GET' && req.headers.accept?.includes('text/html')) {
+        return '/index.html'
+      }
+      return null
+    },
   }
 }
 

@@ -29,6 +29,10 @@ frontend/dist/
 
 # Database (runtime data)
 app/data/anti_fraud.db
+app/data/anti_fraud.db.backup-*
+
+# Claude local workspace
+.claude/
 
 # OS
 .DS_Store

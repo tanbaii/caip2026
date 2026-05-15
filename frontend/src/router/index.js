@@ -2,19 +2,12 @@ import { createRouter, createWebHistory } from 'vue-router'
 import AppShell from '../components/layout/AppShell.vue'
 import LoginPage from '../pages/LoginPage.vue'
 import ChatPage from '../pages/ChatPage.vue'
+import ReportPage from '../pages/ReportPage.vue'
+import GamePage from '../pages/GamePage.vue'
+import KnowledgePage from '../pages/KnowledgePage.vue'
+import LeaderboardPage from '../pages/LeaderboardPage.vue'
+import ProfilePage from '../pages/ProfilePage.vue'
 import { useAuth } from '../composables/useAuth.js'
-
-const ComingSoon = {
-  template: `
-    <section class="flex min-h-[calc(100vh-4rem)] items-center justify-center p-6">
-      <div class="soft-card max-w-xl p-10 text-center">
-        <p class="text-xs font-black uppercase tracking-[0.25em] text-blue-600">Coming Soon</p>
-        <h1 class="mt-4 text-3xl font-black text-slate-900">功能开发中</h1>
-        <p class="mt-3 text-sm font-medium leading-6 text-slate-500">第一轮先完成 AI 对话和风险研判主链路，其他页面将在下一轮接入真实接口。</p>
-      </div>
-    </section>
-  `,
-}
 
 const router = createRouter({
   history: createWebHistory(),
@@ -27,11 +20,11 @@ const router = createRouter({
       children: [
         { path: '', redirect: '/chat' },
         { path: 'chat', component: ChatPage },
-        { path: 'detection', component: ComingSoon },
-        { path: 'report', component: ComingSoon },
-        { path: 'game', component: ComingSoon },
-        { path: 'knowledge', component: ComingSoon },
-        { path: 'leaderboard', component: ComingSoon },
+        { path: 'report', component: ReportPage },
+        { path: 'game', component: GamePage },
+        { path: 'knowledge', component: KnowledgePage },
+        { path: 'leaderboard', component: LeaderboardPage },
+        { path: 'profile', component: ProfilePage },
       ],
     },
   ],
