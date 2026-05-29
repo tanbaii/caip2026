@@ -1,0 +1,133 @@
+{
+  "text_rules": [
+    {
+      "name": "transfer_before_service",
+      "triggers": ["先转", "垫付", "保证金", "手续费", "解冻"],
+      "weight": 18,
+      "reason": "出现放款或服务前收费特征"
+    },
+    {
+      "name": "high_return",
+      "triggers": ["稳赚", "高收益", "内幕消息", "带单"],
+      "weight": 15,
+      "reason": "出现保本高收益话术"
+    },
+    {
+      "name": "authority_pressure",
+      "triggers": ["公检法", "安全账户", "涉嫌", "保密办案"],
+      "weight": 20,
+      "reason": "出现冒充机关施压特征"
+    },
+    {
+      "name": "account_takeover",
+      "triggers": ["验证码", "远程控制", "屏幕共享", "账号密码"],
+      "weight": 22,
+      "reason": "存在账户接管风险"
+    },
+    {
+      "name": "off_platform_trade",
+      "triggers": ["私下交易", "绕开平台", "线下转账"],
+      "weight": 14,
+      "reason": "交易绕开担保平台"
+    },
+    {
+      "name": "fake_refund_or_compensation",
+      "triggers": ["退款", "理赔", "双倍赔付", "订单异常", "客服来电"],
+      "weight": 16,
+      "reason": "命中冒充客服退款/理赔诈骗特征"
+    },
+    {
+      "name": "acquaintance_impersonation",
+      "triggers": ["急借", "别告诉别人", "同学借钱", "熟人借钱"],
+      "weight": 14,
+      "reason": "命中冒充熟人借钱施压特征"
+    },
+    {
+      "name": "campus_loan",
+      "triggers": ["校园贷", "征信修复", "刷流水", "学生专享"],
+      "weight": 16,
+      "reason": "命中校园金融诈骗风险特征"
+    },
+    {
+      "name": "ai_deepfake",
+      "triggers": [
+        "AI换脸", "ai换脸", "深度伪造", "deepfake",
+        "AI语音", "ai语音", "克隆声音", "合成声音",
+        "数字人", "虚拟人视频", "AI生成视频", "ai生成视频",
+        "人脸伪造", "声纹克隆", "视频合成", "AI冒充",
+        "face swap", "voice clone"
+      ],
+      "weight": 22,
+      "reason": "命中 AI 深度伪造诈骗特征（换脸/语音克隆/数字人）"
+    },
+    {
+      "name": "ai_investment_scam",
+      "triggers": [
+        "AI选股", "AI量化", "AI内幕", "智能投顾",
+        "算法交易", "AI预测", "AI荐股", "量化内幕",
+        "AI操盘手", "机器人理财"
+      ],
+      "weight": 17,
+      "reason": "命中 AI 虚假投资/量化骗局特征"
+    }
+  ],
+  "transfer_critical": {
+    "pattern": "(准备转账|已经转账|马上转|立刻转)",
+    "weight": 20,
+    "reason": "用户可能正处于转账关键节点"
+  },
+  "scam_match_bonus": {
+    "base": 6,
+    "cap": 20,
+    "reason": "文本与已知诈骗模型高度相关"
+  },
+  "student_campus": {
+    "keywords": ["校园", "学费", "奖学金", "兼职"],
+    "weight": 10,
+    "reason": "学生群体相关场景，建议提高警惕"
+  },
+  "emotion_bonus": {
+    "emotions": ["anxious", "negative"],
+    "weight": 5,
+    "reason": "情绪信号提示可能受压或焦虑"
+  },
+  "score_levels": {
+    "critical": 70,
+    "high": 40,
+    "medium": 20,
+    "low": 0
+  },
+  "interventions": {
+    "low": [
+      "保持核验习惯：不点未知链接，不向陌生账户转账。"
+    ],
+    "medium": [
+      "先暂停当前操作，和可信任的人二次确认。",
+      "通过官方电话或App核实，不依据聊天截图做决定。"
+    ],
+    "high": [
+      "立即停止转账与验证码提供，退出可疑群聊或App。",
+      "保留聊天记录、收款账户、链接截图，准备报警材料。"
+    ],
+    "critical": [
+      "你当前处于高危受骗阶段，请立刻中断所有付款操作。",
+      "立即联系银行申请止付，并拨打110或96110咨询。",
+      "通知家人、辅导员或同伴协助判断，避免单独处理。"
+    ],
+    "student_append": {
+      "levels": ["high", "critical"],
+      "text": "可同步联系学校保卫处或辅导员获取线下支持。"
+    }
+  },
+  "recommendations": {
+    "common": [
+      "优先使用官方平台或官方客服渠道",
+      "拒绝任何先付款后服务的要求",
+      "涉及资金操作前执行30秒冷静核验"
+    ],
+    "high_extra": [
+      "如已转账，第一时间联系银行与警方进行止损"
+    ],
+    "high_extra_levels": ["high", "critical"]
+  }
+}

@@ -1,5 +1,5 @@
 <template>
-  <div class="rounded-3xl border border-slate-200 bg-white shadow-sm shadow-slate-200/70" :class="paddingClass">
+  <div class="soft-card" :class="paddingClass">
     <slot />
   </div>
 </template>

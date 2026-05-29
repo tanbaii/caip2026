@@ -32,6 +32,14 @@ class ChatResponse(BaseModel):
     total_points: int
     badges: list[str]
     latency_ms: float
+    matched_rules: list[dict[str, Any]] = Field(default_factory=list)
+    risk_breakdown: dict[str, Any] = Field(default_factory=dict)
+    next_actions: list[str] = Field(default_factory=list)
+    session_stage: str = "collecting"
+    known_facts: dict[str, bool] = Field(default_factory=dict)
+    pending_questions: list[str] = Field(default_factory=list)
+    conversation_summary: str = ""
+    turn_count: int = 0
 
 
 class ReportRequest(BaseModel):
@@ -55,6 +63,9 @@ class ReportResponse(BaseModel):
     recommendations: list[str]
     matched_keywords: list[str]
     url_flags: list[str]
+    matched_rules: list[dict[str, Any]] = Field(default_factory=list)
+    risk_breakdown: dict[str, Any] = Field(default_factory=dict)
+    next_actions: list[str] = Field(default_factory=list)
 
 
 class ReportHistoryItem(BaseModel):
@@ -88,6 +99,9 @@ class ScenarioSummary(BaseModel):
     id: str
     title: str
     scam_type: str
+    mode: str = "quiz"
+    story: str | None = None
+    objectives: list[str] = Field(default_factory=list)
 
 
 class ScenarioStartRequest(BaseModel):
@@ -101,6 +115,12 @@ class ScenarioStartResponse(BaseModel):
     step_index: int
     prompt: str
     options: list[str]
+    mode: str = "quiz"
+    story: str | None = None
+    role: str | None = None
+    characters: list[dict[str, Any]] = Field(default_factory=list)
+    clues: list[dict[str, Any]] = Field(default_factory=list)
+    objectives: list[str] = Field(default_factory=list)
 
 
 class ScenarioAnswerRequest(BaseModel):
@@ -118,6 +138,8 @@ class ScenarioAnswerResponse(BaseModel):
     badges: list[str]
     next_prompt: str | None
     next_options: list[str]
+    case_summary: str | None = None
+    debrief: list[str] = Field(default_factory=list)
 
 
 class UserProgressResponse(BaseModel):

@@ -1,5 +1,5 @@
 <template>
-  <div class="rounded-3xl border p-5" :class="[risk.meta.bg, risk.meta.border]">
+  <div class="rounded-3xl border p-5 shadow-sm" :class="[risk.meta.bg, risk.meta.border]">
     <div class="flex items-start justify-between gap-4">
       <div>
         <p class="text-xs font-black uppercase tracking-[0.22em]" :class="risk.meta.text">Risk Score</p>
@@ -13,7 +13,9 @@
     <div class="mt-5 h-3 overflow-hidden rounded-full bg-white/80">
       <div class="h-full rounded-full transition-all" :class="risk.meta.bar" :style="{ width: `${Math.min(risk.score, 100)}%` }" />
     </div>
-    <p class="mt-4 text-sm font-semibold leading-6 text-slate-600">识别意图：{{ risk.intent }}</p>
+    <div class="mt-4 rounded-2xl bg-white/80 p-3 text-sm font-semibold leading-6 text-slate-600 ring-1 ring-white/80">
+      <span class="font-black text-slate-800">识别意图：</span>{{ risk.intent }}
+    </div>
   </div>
 </template>
 

@@ -10,11 +10,11 @@
   }
 
   html {
-    @apply bg-slate-50;
+    @apply bg-slate-100;
   }
 
   body {
-    @apply m-0 min-h-screen bg-slate-50 text-slate-900 font-sans antialiased;
+    @apply m-0 min-h-screen overflow-x-hidden bg-[radial-gradient(circle_at_top_left,_#dbeafe_0,_transparent_34%),linear-gradient(180deg,_#f8fafc_0%,_#eef2f7_100%)] text-slate-900 font-sans antialiased;
   }
 
   button,
@@ -26,11 +26,47 @@
 }
 
 @layer utilities {
+  .page-shell {
+    @apply min-h-screen min-w-0 overflow-x-hidden px-4 py-5 pb-24 sm:px-6 lg:px-8 lg:py-8;
+  }
+
   .soft-card {
-    @apply rounded-3xl border border-slate-200 bg-white shadow-sm shadow-slate-200/60;
+    @apply rounded-[1.75rem] border border-slate-200/80 bg-white shadow-sm shadow-slate-200/70;
+  }
+
+  .glass-card {
+    @apply rounded-[2rem] border border-white/70 bg-white/85 shadow-xl shadow-blue-950/5 backdrop-blur;
+  }
+
+  .muted-panel {
+    @apply rounded-3xl border border-slate-200/80 bg-slate-50/80;
+  }
+
+  .interactive-card {
+    @apply transition-all duration-200 hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-lg hover:shadow-blue-950/5;
+  }
+
+  .section-kicker {
+    @apply text-xs font-black uppercase tracking-[0.22em] text-blue-500;
+  }
+
+  .section-title {
+    @apply text-2xl font-black tracking-tight text-slate-950 md:text-3xl;
   }
 
   .focus-ring {
-    @apply focus:border-blue-500 focus:ring-4 focus:ring-blue-100;
+    @apply focus:border-blue-500 focus:ring-4 focus:ring-blue-100 focus:outline-none;
+  }
+
+  .text-safe {
+    @apply text-emerald-700;
+  }
+
+  .text-risk-medium {
+    @apply text-orange-700;
+  }
+
+  .text-risk-high {
+    @apply text-red-700;
   }
 }

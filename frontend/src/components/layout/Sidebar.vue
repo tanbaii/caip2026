@@ -1,6 +1,6 @@
 <template>
-  <aside class="fixed left-0 top-0 z-50 flex h-screen w-20 flex-col border-r border-slate-200 bg-white px-3 py-6 lg:w-72">
-    <RouterLink to="/chat" class="mb-10 flex items-center gap-3 rounded-2xl px-3 py-2 hover:bg-slate-50">
+  <aside class="fixed inset-x-3 bottom-3 top-auto z-50 flex h-16 items-center justify-between rounded-3xl border border-white/80 bg-white/95 px-3 shadow-2xl shadow-blue-950/10 backdrop-blur md:left-0 md:right-auto md:top-0 md:h-screen md:w-20 md:flex-col md:items-stretch md:rounded-none md:border-r md:border-slate-200 md:px-3 md:py-6 lg:w-72">
+    <RouterLink to="/chat" class="hidden items-center gap-3 rounded-2xl px-3 py-2 hover:bg-slate-50 md:mb-10 md:flex">
       <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-200">
         <Shield class="h-6 w-6" />
       </div>
@@ -10,12 +10,12 @@
       </div>
     </RouterLink>
 
-    <nav class="flex flex-1 flex-col gap-2">
+    <nav class="flex min-w-0 flex-1 items-center justify-around gap-1 md:flex-col md:items-stretch md:justify-start md:gap-2">
       <RouterLink
         v-for="item in navItems"
         :key="item.path"
         :to="item.path"
-        class="group flex items-center gap-4 rounded-2xl px-4 py-3 transition-all"
+        class="group flex h-11 w-11 items-center justify-center rounded-2xl transition-all md:h-auto md:w-auto md:justify-start md:gap-4 md:px-4 md:py-3"
         :class="isActive(item.path) ? 'bg-blue-600 text-white shadow-lg shadow-blue-100' : 'text-slate-500 hover:bg-slate-50 hover:text-slate-900'"
       >
         <component :is="item.icon" class="h-6 w-6 shrink-0 transition-transform group-hover:scale-110" />
@@ -23,7 +23,7 @@
       </RouterLink>
     </nav>
 
-    <div class="border-t border-slate-100 pt-5">
+    <div class="hidden border-t border-slate-100 pt-5 md:block">
       <RouterLink to="/profile" class="mb-3 flex items-center gap-3 rounded-2xl bg-slate-50 px-3 py-3 text-slate-600 hover:bg-slate-100">
         <User class="h-6 w-6 shrink-0" />
         <div class="hidden min-w-0 lg:block">

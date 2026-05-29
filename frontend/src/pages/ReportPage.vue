@@ -1,6 +1,6 @@
 <template>
-  <div class="min-h-screen space-y-6 p-6">
-    <div class="grid gap-6 xl:grid-cols-[1fr_420px]">
+  <div class="page-shell space-y-6">
+    <div class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_420px]">
       <ReportForm :loading="loading" :error="error" @submit="handleSubmit" />
       <ReportResult :result="result" />
     </div>
@@ -8,8 +8,8 @@
     <BaseCard padding-class="p-6" class="space-y-4">
       <div class="flex items-center justify-between gap-4">
         <div>
-          <p class="text-xs font-black uppercase tracking-[0.24em] text-blue-600">History</p>
-          <h2 class="mt-1 text-2xl font-black text-slate-900">最近举报记录</h2>
+          <p class="section-kicker">History</p>
+          <h2 class="mt-1 text-2xl font-black text-slate-950">最近举报记录</h2>
         </div>
         <BaseButton variant="secondary" :disabled="historyLoading || !currentUser?.user_id" @click="loadHistory">
           <Loader2 v-if="historyLoading" class="h-4 w-4 animate-spin" />
@@ -21,13 +21,18 @@
       <p v-if="!currentUser?.user_id" class="rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-500">请先登录后查看举报记录。</p>
       <div v-else-if="!historyLoading && !history.length" class="rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-400">暂无举报记录。</div>
       <div v-else class="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        <div v-for="item in history" :key="item.report_id" class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <div class="flex items-center justify-between gap-3">
-            <p class="font-black text-slate-900">{{ item.report_id }}</p>
+        <div v-for="item in history" :key="item.report_id" class="interactive-card rounded-3xl border border-slate-200 bg-white p-4 shadow-sm shadow-slate-200/70">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <p class="truncate font-black text-slate-900">{{ item.report_id }}</p>
+              <p class="mt-1 text-xs font-semibold text-slate-400">{{ item.created_at || '-' }}</p>
+            </div>
             <StatusBadge :tone="item.verdict === 'high_risk' ? 'danger' : item.verdict === 'suspicious' ? 'warning' : 'success'">{{ item.verdict || '-' }}</StatusBadge>
           </div>
-          <p class="mt-2 text-sm font-semibold text-slate-500">风险分：{{ item.score ?? '-' }}</p>
-          <p class="mt-1 text-xs font-semibold text-slate-400">{{ item.created_at || '-' }}</p>
+          <div class="mt-4 rounded-2xl bg-slate-50 p-3">
+            <p class="text-xs font-black uppercase tracking-widest text-slate-400">风险分</p>
+            <p class="mt-1 text-2xl font-black text-slate-900">{{ item.score ?? '-' }}</p>
+          </div>
         </div>
       </div>
     </BaseCard>

@@ -17,12 +17,15 @@ class ScenarioService:
         }
         self._sessions: dict[str, dict[str, Any]] = {}
 
-    def list_scenarios(self) -> list[dict[str, str]]:
+    def list_scenarios(self) -> list[dict[str, Any]]:
         return [
             {
                 "id": scenario["id"],
                 "title": scenario["title"],
                 "scam_type": scenario["scam_type"],
+                "mode": scenario.get("mode", "quiz"),
+                "story": scenario.get("story"),
+                "objectives": scenario.get("objectives", []),
             }
             for scenario in self._scenarios.values()
         ]
@@ -41,6 +44,12 @@ class ScenarioService:
             "step_index": 0,
             "prompt": first_step["prompt"],
             "options": [opt["text"] for opt in first_step["options"]],
+            "mode": scenario.get("mode", "quiz"),
+            "story": scenario.get("story"),
+            "role": scenario.get("role"),
+            "characters": scenario.get("characters", []),
+            "clues": scenario.get("clues", []),
+            "objectives": scenario.get("objectives", []),
         }
 
     def answer(self, user_id: int, option_index: int) -> dict[str, Any]:
@@ -82,7 +91,7 @@ class ScenarioService:
             next_prompt = next_step["prompt"]
             next_options = [opt["text"] for opt in next_step["options"]]
 
-        return {
+        result: dict[str, Any] = {
             "scenario_id": scenario_id,
             "step_index": step_index,
             "finished": finished,
@@ -93,3 +102,9 @@ class ScenarioService:
             "next_prompt": next_prompt,
             "next_options": next_options,
         }
+
+        if finished:
+            result["case_summary"] = scenario.get("case_summary")
+            result["debrief"] = scenario.get("debrief", [])
+
+        return result

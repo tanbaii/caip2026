@@ -49,32 +49,48 @@ class ReportService:
         self.reports: list[dict[str, object]] = []
 
     def analyze(self, user_id: int, url: str | None, content: str | None) -> dict[str, object]:
-        score = 0
+        url_score = 0
+        content_score = 0
         reasons: list[str] = []
         matched_keywords: list[str] = []
         url_flags: list[str] = []
+        matched_rules: list[dict[str, object]] = []
 
         if url:
             url_result = self.risk_engine.evaluate_url(url)
-            score += int(url_result["score"])
+            url_score = int(url_result["score"])
             url_flags.extend(list(url_result["flags"]))
-            if int(url_result["score"]) >= 30:
+            matched_rules.extend(url_result.get("matched_rules", []))
+            if url_score >= 30:
                 reasons.append("URL结构命中多个风险特征")
 
         if content:
             content_lower = content.lower()
             for word in self.keyword_blacklist:
                 if word in content_lower:
-                    score += 8
+                    content_score += 8
                     matched_keywords.append(word)
+                    matched_rules.append({
+                        "rule": "keyword_blacklist",
+                        "evidence": [word],
+                        "weight": 8,
+                        "reason": f"文本命中诈骗关键词「{word}」",
+                    })
 
             if re.search(r"(先转账|立刻付款|限时到账|点击领取)", content):
-                score += 10
+                content_score += 10
                 reasons.append("文本出现强催促或诱导支付话术")
+                matched_rules.append({
+                    "rule": "urgency_pattern",
+                    "evidence": re.findall(r"(先转账|立刻付款|限时到账|点击领取)", content),
+                    "weight": 10,
+                    "reason": "文本出现强催促或诱导支付话术",
+                })
 
             if matched_keywords:
                 reasons.append("文本命中诈骗关键词黑名单")
 
+        score = url_score + content_score
         verdict = self._score_to_verdict(score)
         recommendations = self._build_recommendations(verdict)
 
@@ -110,6 +126,13 @@ class ReportService:
             "recommendations": recommendations,
             "matched_keywords": sorted(set(matched_keywords)),
             "url_flags": url_flags,
+            "matched_rules": matched_rules,
+            "risk_breakdown": {
+                "url_score": url_score,
+                "content_score": content_score,
+                "total": score,
+            },
+            "next_actions": self._build_next_actions(verdict),
         }
 
     def list_reports(
@@ -151,3 +174,18 @@ class ReportService:
                 "避免在陌生页面输入账号密码和验证码",
             ]
         return ["暂未见明显风险，仍建议保持谨慎，不泄露敏感信息"]
+
+    @staticmethod
+    def _build_next_actions(verdict: str) -> list[str]:
+        if verdict == "high_risk":
+            return [
+                "立即停止与可疑方的一切联系",
+                "保存所有聊天记录、转账截图和链接",
+                "拨打110或96110进行举报咨询",
+            ]
+        if verdict == "suspicious":
+            return [
+                "暂停操作，通过官方渠道二次核验",
+                "不在陌生页面输入账号密码和验证码",
+            ]
+        return ["保持警惕，遇到可疑信息及时举报"]

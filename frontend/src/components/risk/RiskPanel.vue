@@ -1,12 +1,14 @@
 <template>
-  <aside class="w-full xl:w-[390px]">
-    <BaseCard padding-class="p-5" class="sticky top-6 space-y-6">
+  <aside class="w-full min-w-0 xl:w-[400px]">
+    <BaseCard padding-class="p-5" class="space-y-6 xl:sticky xl:top-8" :class="hasRisk && isHighRisk ? 'ring-2 ring-red-100 shadow-red-100/80' : ''">
       <div class="flex items-center justify-between gap-4">
         <div>
-          <p class="text-xs font-black uppercase tracking-[0.24em] text-blue-600">Risk Console</p>
-          <h2 class="mt-1 text-2xl font-black text-slate-900">风险分析面板</h2>
+          <p class="section-kicker" :class="hasRisk && isHighRisk ? 'text-red-500' : ''">Risk Console</p>
+          <h2 class="mt-1 text-2xl font-black text-slate-950">风险分析面板</h2>
         </div>
-        <ShieldAlert class="h-7 w-7 text-blue-600" />
+        <div class="flex h-12 w-12 items-center justify-center rounded-3xl" :class="hasRisk && isHighRisk ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'">
+          <ShieldAlert class="h-7 w-7" />
+        </div>
       </div>
 
       <div v-if="!hasRisk" class="rounded-3xl border border-dashed border-slate-200 bg-slate-50 p-8 text-center">
@@ -18,9 +20,33 @@
       </div>
 
       <template v-else>
+        <div v-if="isHighRisk" class="rounded-3xl border border-red-100 bg-red-50 p-4 text-red-700 shadow-sm shadow-red-100/80">
+          <p class="text-sm font-black">高风险拦截提示</p>
+          <p class="mt-2 text-sm font-semibold leading-6">立即停止转账、不要共享屏幕或验证码，并通过官方渠道核验对方身份。</p>
+        </div>
         <RiskScoreCard :risk="risk" />
+        <RiskBreakdown :breakdown="risk.riskBreakdown" />
+
+        <!-- Conversation state -->
+        <div v-if="risk.turnCount > 0" class="rounded-2xl bg-slate-50 p-4 ring-1 ring-slate-100 space-y-2">
+          <div class="flex items-center justify-between gap-2">
+            <span class="text-xs font-black text-slate-500">会话状态</span>
+            <span class="rounded-full px-2 py-0.5 text-xs font-bold" :class="stageBadgeClass">{{ stageLabel }}</span>
+          </div>
+          <p class="text-xs font-semibold text-slate-500">{{ risk.conversationSummary }}</p>
+          <div v-if="Object.keys(risk.knownFacts).length" class="flex flex-wrap gap-1">
+            <span v-for="(val, key) in risk.knownFacts" :key="key" class="rounded-full bg-white px-2 py-0.5 text-xs font-bold text-slate-600 ring-1 ring-slate-200">{{ factLabel(key) }}</span>
+          </div>
+          <div v-if="risk.pendingQuestions.length" class="space-y-1">
+            <p class="text-xs font-black text-amber-700">待确认：</p>
+            <p v-for="(q, i) in risk.pendingQuestions" :key="i" class="text-xs font-semibold text-amber-600">{{ q }}</p>
+          </div>
+        </div>
+
         <ScamMatchList :items="risk.matchedScams" />
+        <MatchedRuleList :items="risk.matchedRules" />
         <RecommendationList title="劝阻话术" :items="risk.interventionScript" />
+        <NextActionList :items="risk.nextActions" />
         <RecommendationList title="防护建议" :items="risk.recommendations" />
 
         <div class="grid grid-cols-2 gap-3">
@@ -48,11 +74,15 @@
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { Radar, ShieldAlert } from 'lucide-vue-next'
 import { useRiskPanel } from '../../composables/useRiskPanel.js'
 import BaseCard from '../common/BaseCard.vue'
 import StatusBadge from '../common/StatusBadge.vue'
+import MatchedRuleList from './MatchedRuleList.vue'
+import NextActionList from './NextActionList.vue'
 import RecommendationList from './RecommendationList.vue'
+import RiskBreakdown from './RiskBreakdown.vue'
 import RiskScoreCard from './RiskScoreCard.vue'
 import ScamMatchList from './ScamMatchList.vue'
 
@@ -68,4 +98,29 @@ const { hasRisk, risk } = useRiskPanel({
     return props.riskResult
   },
 })
+
+const isHighRisk = computed(() => ['high', 'critical'].includes(risk.value.level))
+
+const stageLabels = { collecting: '信息收集', assessing: '风险评估', warning: '紧急预警', debriefing: '复盘总结' }
+const stageLabel = computed(() => stageLabels[risk.value.sessionStage] || risk.value.sessionStage)
+const stageBadgeClass = computed(() => {
+  if (risk.value.sessionStage === 'warning') return 'bg-red-50 text-red-700 ring-1 ring-red-100'
+  if (risk.value.sessionStage === 'assessing') return 'bg-orange-50 text-orange-700 ring-1 ring-orange-100'
+  return 'bg-blue-50 text-blue-700 ring-1 ring-blue-100'
+})
+
+const factLabels = {
+  has_transfer_request: '转账要求',
+  has_verification_code_request: '索要验证码',
+  has_url: '含链接',
+  has_remote_control: '远程控制',
+  has_secrecy_pressure: '保密施压',
+  has_time_pressure: '限时催促',
+  already_paid: '已转账',
+  mentions_authority: '冒充公检法',
+  mentions_investment: '投资理财',
+  mentions_reward_or_subsidy: '奖金补贴',
+  mentions_ai_deepfake: 'AI伪造',
+}
+function factLabel(key) { return factLabels[key] || key }
 </script>

@@ -8,6 +8,12 @@
 - 账号认证与排行榜
 - 可选的本地 AI 助手（Ollama + deepseek-r1:1.5b）
 
+**比赛文档：**
+
+- [评分点映射表](SCORING_ALIGNMENT.md) — 方向三评分标准逐项对应
+- [答辩演示脚本](DEMO_SCRIPT.md) — 5-7 分钟演示流程
+- [安全设计文档](SECURITY_DESIGN.md) — 脱敏、认证、权限、LLM 边界
+
 如果你希望快速落地部署，请先看本 README；如果你希望看完整交互手册，请看 `USAGE_GUIDE.md`。
 
 ---
@@ -35,7 +41,8 @@
 在项目根目录执行：
 
 ```bash
-cd anti_fraud_system
+# 进入项目根目录
+cd caip2026
 
 # 1) 清理旧数据库（确保用户ID、积分状态可复现）
 rm -f app/data/anti_fraud.db
@@ -226,7 +233,7 @@ python scripts/benchmark_api.py \
 
 ---
 
-## 7. 自动化测试现状（2026-04-25）
+## 7. 自动化测试现状
 
 执行：
 
@@ -234,17 +241,7 @@ python scripts/benchmark_api.py \
 pytest -q
 ```
 
-当前仓库实测结果：
-
-- 15 个通过
-- 10 个失败
-
-失败主因：
-
-- 多个测试仍以字符串 `user_id` 调用接口，但当前接口模型要求整数 `user_id`（触发 422）
-- `GET /auth/me` 的响应字段映射存在不一致（`id` 与 `user_id`）导致校验错误
-
-这不影响你按本 README 的“整数 user_id 路径”完成主流程复现，但会影响全量 pytest 绿灯。
+当前仓库实测结果：**71 个通过，0 个失败**
 
 ---
 

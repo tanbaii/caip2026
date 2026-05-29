@@ -5,7 +5,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -42,13 +42,37 @@ from app.services.scenario_service import ScenarioService
 from app.services.storage import SQLiteStorage
 
 BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = BASE_DIR.parent
+FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
+FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
+LEGACY_WEB_DIR = BASE_DIR / "web"
+SPA_ROUTES = {"login", "chat", "report", "game", "knowledge", "leaderboard", "profile"}
+API_PREFIXES = {"health", "auth", "chat", "ai", "report", "scenarios", "users", "leaderboard", "knowledge"}
 ADMIN_TOKEN = os.getenv("ANTI_FRAUD_ADMIN_TOKEN", "change-me")
 JWT_SECRET = os.getenv("JWT_SECRET", "anti-fraud-lab-secret-key-change-in-production-2024")
+
+# ── CORS ──
+_cors_origins_env = os.getenv("CORS_ORIGINS", "")
+DEV_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://localhost:8000",
+    "http://127.0.0.1:5173",
+    "http://127.0.0.1:8000",
+]
+ALLOWED_ORIGINS = (
+    [o.strip() for o in _cors_origins_env.split(",") if o.strip()]
+    if _cors_origins_env
+    else DEV_CORS_ORIGINS
+)
+
+# ── Rate Limiting (in-memory, no external deps) ──
+RATE_LIMIT_RPM = int(os.getenv("RATE_LIMIT_RPM", "0"))  # 0 = disabled
 
 knowledge_base = KnowledgeBase(BASE_DIR / "data" / "knowledge_base.json")
 intent_recognizer = IntentRecognizer()
 risk_engine = RiskEngine()
-storage = SQLiteStorage(BASE_DIR / "data" / "anti_fraud.db")
+_db_path = os.getenv("DB_PATH") or str(BASE_DIR / "data" / "anti_fraud.db")
+storage = SQLiteStorage(Path(_db_path))
 gamification_service = GamificationService(storage=storage)
 auth_service = AuthService(storage=storage, secret_key=JWT_SECRET)
 report_service = ReportService(
@@ -73,20 +97,70 @@ app = FastAPI(
     version="0.1.0",
 )
 
-app.mount("/static", StaticFiles(directory=BASE_DIR / "web"), name="static")
+if FRONTEND_ASSETS_DIR.exists():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_ASSETS_DIR), name="frontend-assets")
+
+app.mount("/static", StaticFiles(directory=LEGACY_WEB_DIR), name="static")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 
+# ── Rate limiter middleware ──
+
+if RATE_LIMIT_RPM > 0:
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.responses import JSONResponse
+
+    _request_counts: dict[str, list[float]] = {}
+
+    class RateLimitMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            client_ip = request.client.host if request.client else "unknown"
+            now = time.time()
+            window_start = now - 60.0
+
+            hits = _request_counts.get(client_ip, [])
+            hits = [t for t in hits if t > window_start]
+
+            if len(hits) >= RATE_LIMIT_RPM:
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": "请求过于频繁，请稍后再试"},
+                )
+
+            hits.append(now)
+            _request_counts[client_ip] = hits
+            return await call_next(request)
+
+    app.add_middleware(RateLimitMiddleware)
+
+
+def _frontend_index_file() -> Path:
+    vue_index = FRONTEND_DIST_DIR / "index.html"
+    if vue_index.exists():
+        return vue_index
+    return LEGACY_WEB_DIR / "index.html"
+
+
 @app.get("/", include_in_schema=False)
 def home() -> FileResponse:
-    return FileResponse(BASE_DIR / "web" / "index.html")
+    return FileResponse(_frontend_index_file())
+
+
+@app.get("/login", include_in_schema=False)
+@app.get("/chat", include_in_schema=False)
+@app.get("/report", include_in_schema=False)
+@app.get("/game", include_in_schema=False)
+@app.get("/knowledge", include_in_schema=False)
+@app.get("/profile", include_in_schema=False)
+def vue_page() -> FileResponse:
+    return FileResponse(_frontend_index_file())
 
 
 @app.get("/health")
@@ -242,9 +316,12 @@ def get_me(authorization: str | None = Header(default=None)) -> UserInfoResponse
 
 # ── 排行榜 ──
 
-@app.get("/leaderboard", response_model=LeaderboardResponse)
-def leaderboard(top: int = Query(default=20, ge=1, le=100)) -> LeaderboardResponse:
-    items = storage.get_leaderboard(limit=top)
+@app.get("/leaderboard", response_model=LeaderboardResponse | None)
+def leaderboard(request: Request, top: int | None = Query(default=None, ge=1, le=100)) -> LeaderboardResponse | FileResponse:
+    if "top" not in request.query_params:
+        return FileResponse(_frontend_index_file())
+
+    items = storage.get_leaderboard(limit=top or 20)
     return LeaderboardResponse(total=len(items), items=items)
 
 
@@ -266,3 +343,13 @@ async def ai_chat(request: AIChatRequest) -> AIChatResponse:
             reply=f"抱歉，AI 助手暂时无法响应：{exc}。请稍后重试，或使用上方「智能对话研判」功能。",
             latency_ms=latency_ms,
         )
+
+
+@app.get("/{path:path}", include_in_schema=False)
+def spa_fallback(path: str) -> FileResponse:
+    first_segment = path.split("/", 1)[0]
+    if first_segment in SPA_ROUTES:
+        return FileResponse(_frontend_index_file())
+    if first_segment in API_PREFIXES:
+        raise HTTPException(status_code=404, detail="Not Found")
+    raise HTTPException(status_code=404, detail="Not Found")

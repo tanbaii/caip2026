@@ -1,10 +1,10 @@
 <template>
-  <div class="min-h-screen p-6">
-    <div class="grid gap-6 xl:grid-cols-[380px_1fr]">
+  <div class="page-shell">
+    <div class="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
       <BaseCard padding-class="p-6" class="space-y-5">
         <div>
-          <p class="text-xs font-black uppercase tracking-[0.24em] text-indigo-600">Training</p>
-          <h1 class="mt-2 text-3xl font-black text-slate-900">反诈闯关</h1>
+          <p class="section-kicker">Training</p>
+          <h1 class="mt-2 text-3xl font-black tracking-tight text-slate-950">反诈闯关</h1>
           <p class="mt-2 text-sm font-medium leading-6 text-slate-500">关卡来自真实后端 `/scenarios`，选择后开始剧情训练。</p>
         </div>
 
@@ -15,7 +15,7 @@
 
         <p v-if="error" class="rounded-2xl bg-red-50 px-4 py-3 text-sm font-bold text-red-700 ring-1 ring-red-100">{{ error }}</p>
         <div v-if="!loading && !scenarios.length" class="rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-400">暂无关卡数据。</div>
-        <div class="space-y-3">
+        <div class="max-h-[62vh] space-y-3 overflow-y-auto pr-1">
           <ScenarioCard
             v-for="scenario in scenarios"
             :key="scenario.id"

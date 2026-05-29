@@ -1,0 +1,54 @@
+{
+  "shortener_domains": ["t.cn", "bit.ly", "tinyurl.com", "dwz.cn", "is.gd"],
+  "risky_tlds": ["top", "xyz", "click", "fit", "work", "icu", "buzz"],
+  "checks": [
+    {
+      "name": "missing_protocol",
+      "condition": "missing_protocol",
+      "weight": 15,
+      "flag": "链接未使用标准http/https协议"
+    },
+    {
+      "name": "ip_direct",
+      "condition": "ip_direct",
+      "weight": 20,
+      "flag": "域名使用IP直连"
+    },
+    {
+      "name": "at_symbol",
+      "condition": "at_symbol",
+      "weight": 20,
+      "flag": "URL包含@符号，可能存在跳转伪装"
+    },
+    {
+      "name": "punycode",
+      "condition": "punycode",
+      "weight": 20,
+      "flag": "检测到punycode域名"
+    },
+    {
+      "name": "shortener",
+      "condition": "shortener_domain",
+      "weight": 15,
+      "flag": "短链域名需要二次核验"
+    },
+    {
+      "name": "risky_tld",
+      "condition": "risky_tld",
+      "weight": 12,
+      "flag": "域名后缀命中高风险集合"
+    },
+    {
+      "name": "plain_http",
+      "condition": "plain_http",
+      "weight": 10,
+      "flag": "未使用HTTPS加密"
+    }
+  ],
+  "score_levels": {
+    "critical": 70,
+    "high": 40,
+    "medium": 20,
+    "low": 0
+  }
+}

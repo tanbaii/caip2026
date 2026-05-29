@@ -1,14 +1,17 @@
 <template>
-  <div class="min-h-screen space-y-6 p-6">
+  <div class="page-shell space-y-6">
     <BaseCard padding-class="p-6 md:p-8" class="space-y-6">
       <div class="flex flex-col gap-5 xl:flex-row xl:items-end xl:justify-between">
         <div>
-          <p class="text-xs font-black uppercase tracking-[0.24em] text-blue-600">Knowledge Base</p>
-          <h1 class="mt-2 text-4xl font-black text-slate-900">反诈知识库</h1>
+          <p class="section-kicker">Knowledge Base</p>
+          <h1 class="mt-2 text-4xl font-black tracking-tight text-slate-950">反诈知识库</h1>
           <p class="mt-2 max-w-2xl text-sm font-medium leading-6 text-slate-500">骗局特征、法律依据和防护建议均来自真实后端知识库接口。</p>
         </div>
         <div class="w-full xl:w-96">
-          <input v-model.trim="keyword" class="focus-ring w-full rounded-2xl border bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700" placeholder="搜索骗局名称、关键词、案例..." />
+          <div class="rounded-3xl border border-slate-200 bg-white p-2 shadow-sm shadow-slate-200/70 focus-within:border-blue-300 focus-within:ring-4 focus-within:ring-blue-100">
+            <input v-model.trim="keyword" class="w-full rounded-2xl border-0 bg-slate-50 px-4 py-3 text-sm font-bold text-slate-700 placeholder:text-slate-400" placeholder="搜索骗局名称、关键词、案例..." />
+          </div>
+          <p class="mt-2 text-xs font-semibold text-slate-400">当前匹配 {{ filteredScams.length }} 个骗局、{{ filteredLaws.length }} 条法律知识</p>
         </div>
       </div>
 
@@ -17,13 +20,13 @@
 
     <section class="space-y-4">
       <div class="flex items-center justify-between">
-        <h2 class="text-2xl font-black text-slate-900">骗局知识</h2>
+        <h2 class="text-2xl font-black text-slate-950">骗局知识</h2>
         <StatusBadge tone="info">{{ filteredScams.length }} 条</StatusBadge>
       </div>
       <div v-if="loading" class="soft-card p-8 text-center text-sm font-bold text-slate-500">正在加载知识库...</div>
       <div v-else-if="!filteredScams.length" class="soft-card p-8 text-center text-sm font-bold text-slate-400">暂无匹配的骗局知识。</div>
       <div v-else class="grid gap-5 xl:grid-cols-2">
-        <BaseCard v-for="item in filteredScams" :key="item.id || item.name" padding-class="p-6" class="space-y-5">
+        <BaseCard v-for="item in filteredScams" :key="item.id || item.name" padding-class="p-6" class="interactive-card space-y-5">
           <div class="flex items-start justify-between gap-4">
             <div>
               <p class="text-xs font-black uppercase tracking-widest text-blue-600">{{ item.type || item.id || 'SCAM' }}</p>
@@ -37,7 +40,7 @@
           <InfoList title="风险信号" :items="list(item.red_flags)" />
           <div class="rounded-2xl bg-slate-50 p-4">
             <p class="text-xs font-black uppercase tracking-widest text-slate-400">典型案例</p>
-            <p class="mt-2 text-sm font-semibold leading-7 text-slate-600">{{ item.typical_case || '暂无案例。' }}</p>
+            <p class="mt-2 break-words text-sm font-semibold leading-7 text-slate-600">{{ item.typical_case || '暂无案例。' }}</p>
           </div>
           <InfoList title="防护建议" :items="list(item.prevention)" />
           <TagList title="法律依据" :items="list(item.legal_refs)" tone="info" />
@@ -47,7 +50,7 @@
 
     <section class="space-y-4">
       <div class="flex items-center justify-between">
-        <h2 class="text-2xl font-black text-slate-900">法律知识</h2>
+        <h2 class="text-2xl font-black text-slate-950">法律知识</h2>
         <StatusBadge tone="muted">{{ filteredLaws.length }} 条</StatusBadge>
       </div>
       <div v-if="!filteredLaws.length" class="soft-card p-8 text-center text-sm font-bold text-slate-400">暂无匹配的法律知识。</div>
@@ -79,7 +82,7 @@ const InfoList = {
     <section class="space-y-2">
       <h4 class="text-sm font-black text-slate-900">{{ title }}</h4>
       <ul v-if="items.length" class="space-y-2">
-        <li v-for="(item,index) in items" :key="index" class="rounded-2xl bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-600">{{ item }}</li>
+        <li v-for="(item,index) in items" :key="index" class="break-words rounded-2xl border border-slate-100 bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-600">{{ item }}</li>
       </ul>
       <p v-else class="rounded-2xl bg-slate-50 p-3 text-sm font-semibold text-slate-400">暂无内容。</p>
     </section>
@@ -92,7 +95,7 @@ const TagList = {
     <section class="space-y-2">
       <h4 class="text-sm font-black text-slate-900">{{ title }}</h4>
       <div v-if="items.length" class="flex flex-wrap gap-2">
-        <span v-for="item in items" :key="item" class="rounded-full px-3 py-1.5 text-xs font-black ring-1" :class="tone === 'danger' ? 'bg-red-50 text-red-700 ring-red-100' : 'bg-blue-50 text-blue-700 ring-blue-100'">{{ item }}</span>
+        <span v-for="item in items" :key="item" class="max-w-full break-words rounded-full px-3 py-1.5 text-xs font-black shadow-sm ring-1" :class="tone === 'danger' ? 'bg-red-50 text-red-700 shadow-red-100 ring-red-100' : 'bg-blue-50 text-blue-700 shadow-blue-100 ring-blue-100'">{{ item }}</span>
       </div>
       <p v-else class="rounded-2xl bg-slate-50 p-3 text-sm font-semibold text-slate-400">暂无内容。</p>
     </section>

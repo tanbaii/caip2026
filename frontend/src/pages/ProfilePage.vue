@@ -1,10 +1,10 @@
 <template>
-  <div class="min-h-screen space-y-6 p-6">
+  <div class="page-shell space-y-6">
     <BaseCard padding-class="p-6 md:p-8" class="space-y-6">
       <div class="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
         <div>
-          <p class="text-xs font-black uppercase tracking-[0.24em] text-blue-600">Profile</p>
-          <h1 class="mt-2 text-4xl font-black text-slate-900">我的等级</h1>
+          <p class="section-kicker">Profile</p>
+          <h1 class="mt-2 text-4xl font-black tracking-tight text-slate-950">我的等级</h1>
           <p class="mt-2 text-sm font-medium text-slate-500">展示真实 `/users/{user_id}/progress` 返回的成长数据。</p>
         </div>
         <BaseButton variant="secondary" :disabled="loading || !currentUser?.user_id" @click="loadProgress">
@@ -17,11 +17,11 @@
       <p v-if="error" class="rounded-2xl bg-red-50 px-4 py-3 text-sm font-bold text-red-700 ring-1 ring-red-100">{{ error }}</p>
     </BaseCard>
 
-    <div v-if="progress" class="grid gap-6 xl:grid-cols-[1fr_380px]">
+    <div v-if="progress" class="grid gap-6 xl:grid-cols-[minmax(0,1fr)_380px]">
       <BaseCard padding-class="p-8" class="space-y-8">
         <div class="flex flex-col gap-6 md:flex-row md:items-center md:justify-between">
           <div>
-            <h2 class="text-3xl font-black text-slate-900">{{ currentUser?.nickname || currentUser?.username || `用户 ${progress.user_id}` }}</h2>
+            <h2 class="break-words text-3xl font-black text-slate-950">{{ currentUser?.nickname || currentUser?.username || `用户 ${progress.user_id}` }}</h2>
             <p class="mt-2 text-sm font-semibold text-slate-500">用户 ID：{{ progress.user_id }}</p>
           </div>
           <div class="text-left md:text-right">
@@ -42,9 +42,9 @@
 
         <section class="space-y-3">
           <h3 class="text-lg font-black text-slate-900">徽章</h3>
-          <div class="flex flex-wrap gap-2">
-            <StatusBadge v-for="badge in list(progress.badges)" :key="badge" tone="info">{{ badge }}</StatusBadge>
-            <StatusBadge v-if="!list(progress.badges).length" tone="muted">暂无徽章</StatusBadge>
+          <div class="grid gap-3 sm:grid-cols-2">
+            <div v-for="badge in list(progress.badges)" :key="badge" class="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-black text-blue-700 shadow-sm shadow-blue-100/70">{{ badge }}</div>
+            <div v-if="!list(progress.badges).length" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-400">暂无徽章</div>
           </div>
         </section>
       </BaseCard>
@@ -57,6 +57,10 @@
         <BaseCard padding-class="p-6" class="bg-white">
           <p class="text-xs font-black uppercase tracking-widest text-slate-400">完成闯关</p>
           <p class="mt-3 text-5xl font-black text-slate-900">{{ progress.scenarios_completed ?? 0 }}</p>
+        </BaseCard>
+        <BaseCard padding-class="p-6" class="bg-white">
+          <p class="text-xs font-black uppercase tracking-widest text-slate-400">高风险拦截</p>
+          <p class="mt-3 text-5xl font-black text-red-600">{{ progress.high_risk_blocks ?? 0 }}</p>
         </BaseCard>
       </div>
     </div>
@@ -71,7 +75,6 @@ import { Loader2 } from 'lucide-vue-next'
 import { getUserProgress } from '../api/leaderboard.js'
 import BaseButton from '../components/common/BaseButton.vue'
 import BaseCard from '../components/common/BaseCard.vue'
-import StatusBadge from '../components/common/StatusBadge.vue'
 import { useAuth } from '../composables/useAuth.js'
 
 const { currentUser } = useAuth()

@@ -83,6 +83,8 @@ export function useScenario(userRef) {
         points_gained: Number(data.points_gained) || 0,
         total_points: Number(data.total_points) || 0,
         badges: Array.isArray(data.badges) ? data.badges : [],
+        case_summary: data.case_summary || activeScenario.value.case_summary || null,
+        debrief: Array.isArray(data.debrief) && data.debrief.length ? data.debrief : (activeScenario.value.debrief || []),
       }
       return activeScenario.value
     } catch (err) {

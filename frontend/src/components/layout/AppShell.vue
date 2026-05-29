@@ -1,7 +1,7 @@
 <template>
-  <div class="min-h-screen bg-slate-50 text-slate-900">
+  <div class="min-h-screen overflow-x-hidden text-slate-900">
     <Sidebar />
-    <main class="min-h-screen pl-20 lg:pl-72">
+    <main class="min-h-screen min-w-0 overflow-x-hidden md:pl-20 lg:pl-72">
       <router-view />
     </main>
   </div>
