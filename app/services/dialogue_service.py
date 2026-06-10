@@ -20,11 +20,15 @@ class DialogueService:
         intent_recognizer: IntentRecognizer,
         risk_engine: RiskEngine,
         gamification: GamificationService,
+        knowledge_retriever: Any | None = None,
+        rag_reply_generator: Any | None = None,
     ) -> None:
         self.knowledge_base = knowledge_base
         self.intent_recognizer = intent_recognizer
         self.risk_engine = risk_engine
         self.gamification = gamification
+        self.knowledge_retriever = knowledge_retriever
+        self.rag_reply_generator = rag_reply_generator
         self._history: dict[str, list[dict[str, str]]] = {}
         self._url_pattern = re.compile(r"(https?://\S+|www\.\S+)", re.IGNORECASE)
         self._conv_state = ConversationStateManager()
@@ -36,6 +40,13 @@ class DialogueService:
         intent, _, _ = self.intent_recognizer.detect_intent(request.message, history)
         matched_scams = self.knowledge_base.search_scams(request.message)
         matched_names = [item["name"] for item in matched_scams]
+        current_scam_type = _top_scam_type(matched_scams)
+
+        if _is_new_explicit_scam_topic(history, current_scam_type):
+            history = []
+            self._history[request.user_id] = []
+            self._conv_state.reset(request.user_id)
+            intent, _, _ = self.intent_recognizer.detect_intent(request.message, history)
 
         risk = self.risk_engine.evaluate_text(
             request.message,
@@ -87,6 +98,18 @@ class DialogueService:
             # Recompute stage + pending_questions against final risk_level
             conv_data = self._conv_state.recompute_stage(request.user_id, risk_level)
 
+        previous_score = _last_history_score(history)
+        if previous_score is not None and previous_score > total_score:
+            total_score = previous_score
+            breakdown["context_score_floor"] = previous_score
+            breakdown["total"] = total_score
+            risk_level = self.risk_engine._score_to_level(total_score)
+            intervention_script = self.risk_engine._build_intervention(risk_level, request.user_profile.role)
+            recommendations = self.risk_engine._build_recommendations(risk_level)
+            conv_data = self._conv_state.recompute_stage(request.user_id, risk_level)
+
+        retrieved_knowledge = self._retrieve_knowledge(request.message)
+
         reply = self._build_reply(
             message=request.message,
             intent=intent,
@@ -98,6 +121,21 @@ class DialogueService:
             known_facts=conv_data["known_facts"],
             turn_count=conv_data["turn_count"],
         )
+
+        if self.rag_reply_generator:
+            reply = self.rag_reply_generator.generate(
+                message=request.message,
+                risk_context={
+                    "risk_score": total_score,
+                    "risk_level": risk_level,
+                    "matched_rules": all_matched_rules,
+                    "risk_breakdown": breakdown,
+                    "intervention_script": intervention_script,
+                    "recommendations": recommendations,
+                },
+                retrieved_knowledge=retrieved_knowledge,
+                fallback_reply=reply,
+            )
 
         action = "daily_chat"
         if risk_level in {"high", "critical"}:
@@ -116,6 +154,8 @@ class DialogueService:
                 "message": sanitize_text(request.message),
                 "intent": intent,
                 "risk_level": risk_level,
+                "risk_score": str(total_score),
+                "scam_type": current_scam_type,
             }
         ]
         self._history[request.user_id] = new_history[-12:]
@@ -127,7 +167,7 @@ class DialogueService:
             "intent": intent,
             "matched_scams": matched_names,
             "risk_level": risk_level,
-            "risk_score": int(risk["score"]),
+            "risk_score": total_score,
             "intervention_script": intervention_script,
             "recommendations": recommendations,
             "points_gained": int(reward["points_gained"]),
@@ -142,7 +182,16 @@ class DialogueService:
             "pending_questions": conv_data["pending_questions"],
             "conversation_summary": _build_conversation_summary(conv_data),
             "turn_count": conv_data["turn_count"],
+            "retrieved_knowledge": retrieved_knowledge,
         }
+
+    def _retrieve_knowledge(self, message: str) -> list[dict[str, Any]]:
+        if not self.knowledge_retriever:
+            return []
+        try:
+            return list(self.knowledge_retriever.retrieve(message))
+        except Exception:
+            return []
 
     def _build_reply(
         self,
@@ -262,6 +311,37 @@ def _build_chat_next_actions(risk_level: str) -> list[str]:
         "不向陌生账户转账",
         "继续提供对方话术细节以便更准确研判",
     ]
+
+
+def _last_history_score(history: list[dict[str, str]]) -> int | None:
+    for item in reversed(history):
+        raw_score = item.get("risk_score")
+        if raw_score is None:
+            continue
+        try:
+            return int(raw_score)
+        except (TypeError, ValueError):
+            return None
+    return None
+
+
+def _top_scam_type(matched_scams: list[dict[str, Any]]) -> str:
+    if not matched_scams:
+        return ""
+    return str(matched_scams[0].get("type") or "")
+
+
+def _last_history_scam_type(history: list[dict[str, str]]) -> str:
+    for item in reversed(history):
+        scam_type = item.get("scam_type")
+        if scam_type:
+            return scam_type
+    return ""
+
+
+def _is_new_explicit_scam_topic(history: list[dict[str, str]], current_scam_type: str) -> bool:
+    previous_scam_type = _last_history_scam_type(history)
+    return bool(current_scam_type and previous_scam_type and current_scam_type != previous_scam_type)
 
 
 def _build_conversation_summary(conv_data: dict) -> str:

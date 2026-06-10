@@ -39,6 +39,8 @@ def test_chat_high_risk_warning() -> None:
     data = response.json()
     assert data["risk_level"] in {"high", "critical"}
     assert data["risk_score"] >= 40
+    assert "retrieved_knowledge" in data
+    assert isinstance(data["retrieved_knowledge"], list)
 
 
 def test_report_suspicious_url() -> None:
@@ -1171,3 +1173,156 @@ def test_multi_turn_stage_consistent_with_final_risk_level() -> None:
     assert d2["known_facts"].get("has_transfer_request") is True
     assert d2["turn_count"] == 2
 
+
+def test_chat_risk_score_uses_final_breakdown_total() -> None:
+    user_id = 9300
+    r1 = client.post("/chat", json={
+        "user_id": user_id,
+        "message": "有人让我先垫付刷单，说完成后返利",
+        "user_profile": {"role": "student"},
+        "emotion": "anxious",
+    })
+    assert r1.status_code == 200
+    d1 = r1.json()
+
+    r2 = client.post("/chat", json={
+        "user_id": user_id,
+        "message": "我已经下单了咋办",
+        "user_profile": {"role": "student"},
+        "emotion": "anxious",
+    })
+    assert r2.status_code == 200
+    d2 = r2.json()
+
+    assert d1["risk_score"] == d1["risk_breakdown"]["total"]
+    assert d2["risk_score"] == d2["risk_breakdown"]["total"]
+    assert d2["risk_score"] >= d1["risk_score"]
+
+
+def test_chat_new_scam_topic_resets_stale_conversation_facts() -> None:
+    user_id = 9400
+    r1 = client.post("/chat", json={
+        "user_id": user_id,
+        "message": "有人用AI换脸视频冒充我朋友借钱，让我马上转账",
+        "user_profile": {"role": "student"},
+        "emotion": "anxious",
+    })
+    assert r1.status_code == 200
+    d1 = r1.json()
+    assert d1["known_facts"].get("mentions_ai_deepfake") is True
+
+    r2 = client.post("/chat", json={
+        "user_id": user_id,
+        "message": "有人让我先垫付刷单，说完成后返利",
+        "user_profile": {"role": "student"},
+        "emotion": "anxious",
+    })
+    assert r2.status_code == 200
+    d2 = r2.json()
+
+    rule_names = {item.get("rule", "") for item in d2["matched_rules"]}
+    assert "conv_ai_fake_transfer" not in rule_names
+    assert d2["known_facts"].get("mentions_ai_deepfake") is not True
+    assert d2["known_facts"].get("mentions_reward_or_subsidy") is True
+    assert d2["turn_count"] == 1
+
+
+def test_rag_rule_formatter_hides_internal_rule_names() -> None:
+    from app.services.rag_reply_service import _format_rules
+
+    text = _format_rules([
+        {
+            "rule": "conv_ai_fake_transfer",
+            "weight": 22,
+            "reason": "多轮对话确认：AI伪造身份并要求转账",
+        }
+    ])
+
+    assert "conv_ai_fake_transfer" not in text
+    assert "22" not in text
+    assert "AI伪造身份" in text
+
+
+def test_rag_sanitizer_rewrites_report_style_reply() -> None:
+    from app.services.rag_reply_service import _sanitize_reply
+
+    reply = """朋友，你描述的很像刷单返利诈骗。
+【风险等级】medium
+【最终风险分】29
+【命中规则】出现放款或服务前收费特征"""
+
+    cleaned = _sanitize_reply(
+        reply,
+        {
+            "risk_level": "medium",
+            "matched_rules": [
+                {"reason": "出现放款或服务前收费特征"},
+                {"reason": "文本与已知诈骗模型高度相关"},
+            ],
+            "recommendations": [
+                "优先使用官方平台或官方客服渠道",
+                "拒绝任何先付款后服务的要求",
+            ],
+        },
+        "有人让我先垫付刷单，说完成后返利",
+    )
+
+    assert "【风险等级】" not in cleaned
+    assert "【最终风险分】" not in cleaned
+    assert "命中规则" not in cleaned
+    assert "先垫付" in cleaned
+    assert "不要继续" in cleaned or "不要再" in cleaned
+
+
+def test_rag_sanitizer_rewrites_prompt_leak() -> None:
+    from app.services.rag_reply_service import _sanitize_reply
+
+    cleaned = _sanitize_reply(
+        "请重新按【高风险】规则引擎评估。",
+        {
+            "risk_level": "high",
+            "matched_rules": [{"reason": "多轮对话确认：以奖金/补贴为由要求缴费"}],
+            "recommendations": ["保留聊天记录", "联系银行申请止付"],
+        },
+        "我把他拉黑了",
+    )
+
+    assert "请重新按" not in cleaned
+    assert "规则引擎" not in cleaned
+    assert "不要再" in cleaned or "马上停" in cleaned
+
+
+def test_rag_reply_blocks_internal_json_echo() -> None:
+    from app.services.rag_reply_service import _looks_like_internal_echo
+
+    assert _looks_like_internal_echo('{"user_message":"x","risk_engine_result":{}}') is True
+    assert _looks_like_internal_echo("请先停止付款，并通过官方渠道核实。") is False
+
+
+def test_chat_workflow_runner_preserves_chat_contract() -> None:
+    from app.main import gamification_service, intent_recognizer, knowledge_base, risk_engine
+    from app.models.schemas import ChatRequest
+    from app.services.chat_workflow import ChatWorkflowRunner
+    from app.services.dialogue_service import DialogueService
+
+    service = DialogueService(
+        knowledge_base=knowledge_base,
+        intent_recognizer=intent_recognizer,
+        risk_engine=risk_engine,
+        gamification=gamification_service,
+    )
+    runner = ChatWorkflowRunner(service)
+    request = ChatRequest.model_validate({
+        "user_id": 9500,
+        "message": "有人让我先垫付刷单，说完成后返利",
+        "user_profile": {"role": "student"},
+        "emotion": "anxious",
+    })
+
+    data = runner.process_chat(request)
+
+    assert runner.engine in {"langgraph", "sequential"}
+    assert data["risk_score"] == data["risk_breakdown"]["total"]
+    assert data["matched_scams"]
+    assert "retrieved_knowledge" in data
+    assert isinstance(data["reply"], str)

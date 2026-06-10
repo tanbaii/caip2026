@@ -28,6 +28,7 @@ frontend/dist/
 # Environment & secrets
 .env
 .env.*
+!.env.example
 
 # Database (runtime data)
 app/data/anti_fraud.db

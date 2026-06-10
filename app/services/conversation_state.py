@@ -130,6 +130,11 @@ class ConversationStateManager:
     ) -> dict[str, Any]:
         """Update state after a turn, return state as dict."""
         state = self.get_state(user_id)
+        current_scam_type = _top_scam_type(matched_scams)
+        if _is_new_scam_topic(state, current_scam_type):
+            state = ConversationState()
+            self._states[user_id] = state
+
         state.turn_count += 1
         state.last_risk_level = risk_level
         state.last_intent = intent
@@ -138,8 +143,8 @@ class ConversationStateManager:
         _extract_facts(message, state.known_facts)
 
         # Update suspected scam type from matched scams
-        if matched_scams and not state.suspected_scam_type:
-            state.suspected_scam_type = matched_scams[0].get("type", "")
+        if current_scam_type and not state.suspected_scam_type:
+            state.suspected_scam_type = current_scam_type
 
         # Determine stage
         state.session_stage = _determine_stage(state, risk_level)
@@ -199,6 +204,20 @@ def _extract_facts(message: str, known_facts: dict[str, bool]) -> None:
     # URL detection
     if not known_facts.get("has_url") and _URL_RE.search(message):
         known_facts["has_url"] = True
+
+
+def _top_scam_type(matched_scams: list[dict[str, Any]]) -> str:
+    if not matched_scams:
+        return ""
+    return str(matched_scams[0].get("type") or "")
+
+
+def _is_new_scam_topic(state: ConversationState, current_scam_type: str) -> bool:
+    return bool(
+        current_scam_type
+        and state.suspected_scam_type
+        and current_scam_type != state.suspected_scam_type
+    )
 
 
 def _determine_stage(state: ConversationState, risk_level: str) -> str:

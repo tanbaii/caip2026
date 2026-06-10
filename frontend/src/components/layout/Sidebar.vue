@@ -1,5 +1,5 @@
 <template>
-  <aside class="fixed inset-x-3 bottom-3 top-auto z-50 flex h-16 items-center justify-between rounded-3xl border border-white/80 bg-white/95 px-3 shadow-2xl shadow-blue-950/10 backdrop-blur md:left-0 md:right-auto md:top-0 md:h-screen md:w-20 md:flex-col md:items-stretch md:rounded-none md:border-r md:border-slate-200 md:px-3 md:py-6 lg:w-72">
+  <aside class="fixed inset-x-3 bottom-3 top-auto z-50 flex h-16 items-center justify-between rounded-3xl border border-white/80 bg-white/95 px-3 shadow-2xl shadow-blue-950/10 backdrop-blur md:left-0 md:right-auto md:top-0 md:h-screen md:w-20 md:flex-col md:items-stretch md:rounded-none md:border-r md:border-slate-200 md:px-3 md:py-5 lg:w-56">
     <RouterLink to="/chat" class="hidden items-center gap-3 rounded-2xl px-3 py-2 hover:bg-slate-50 md:mb-10 md:flex">
       <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-200">
         <Shield class="h-6 w-6" />

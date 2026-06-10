@@ -11,6 +11,10 @@ import tempfile
 _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp_db.close()
 os.environ["DB_PATH"] = _tmp_db.name
+os.environ["CHAT_LLM_ENABLED"] = "0"
+os.environ["RAG_LLM_ENABLED"] = "0"
+os.environ["RAG_RETRIEVAL_ENABLED"] = "0"
+os.environ["CHAT_FLOW_ENGINE"] = "classic"
 
 import pytest  # noqa: E402
 

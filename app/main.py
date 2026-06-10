@@ -32,17 +32,22 @@ from app.models.schemas import (
     UserProgressResponse,
 )
 from app.services.auth_service import AuthService
+from app.services.chat_workflow import ChatWorkflowRunner
 from app.services.dialogue_service import DialogueService
+from app.services.env_loader import load_dotenv
 from app.services.gamification import GamificationService
 from app.services.intent_recognizer import IntentRecognizer
 from app.services.knowledge_base import KnowledgeBase
+from app.services.knowledge_retriever import KnowledgeRetriever
 from app.services.report_service import ReportService
+from app.services.rag_reply_service import RagReplyGenerator
 from app.services.risk_engine import RiskEngine
 from app.services.scenario_service import ScenarioService
 from app.services.storage import SQLiteStorage
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
+load_dotenv(PROJECT_ROOT / ".env")
 FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
 FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
 LEGACY_WEB_DIR = BASE_DIR / "web"
@@ -84,12 +89,29 @@ scenario_service = ScenarioService(
     data_path=BASE_DIR / "data" / "scenarios.json",
     gamification=gamification_service,
 )
+knowledge_retriever = (
+    KnowledgeRetriever.from_env()
+    if os.getenv("RAG_RETRIEVAL_ENABLED", "1").lower() not in {"0", "false", "no"}
+    else None
+)
+rag_reply_generator = (
+    RagReplyGenerator()
+    if (
+        os.getenv("RAG_LLM_ENABLED", "0").lower() in {"1", "true", "yes"}
+        or os.getenv("CHAT_LLM_ENABLED", "0").lower() in {"1", "true", "yes"}
+    )
+    else None
+)
 dialogue_service = DialogueService(
     knowledge_base=knowledge_base,
     intent_recognizer=intent_recognizer,
     risk_engine=risk_engine,
     gamification=gamification_service,
+    knowledge_retriever=knowledge_retriever,
+    rag_reply_generator=rag_reply_generator,
 )
+if os.getenv("CHAT_FLOW_ENGINE", "classic").lower() in {"langgraph", "graph"}:
+    dialogue_service = ChatWorkflowRunner(dialogue_service)
 
 app = FastAPI(
     title="Anti-Fraud Multi-modal Dialogue System",

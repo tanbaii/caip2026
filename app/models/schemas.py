@@ -40,6 +40,7 @@ class ChatResponse(BaseModel):
     pending_questions: list[str] = Field(default_factory=list)
     conversation_summary: str = ""
     turn_count: int = 0
+    retrieved_knowledge: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ReportRequest(BaseModel):

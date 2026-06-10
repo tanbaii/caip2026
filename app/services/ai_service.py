@@ -3,8 +3,8 @@ from __future__ import annotations
 import httpx
 
 # ── Ollama 配置（WSL 本地部署）──
-OLLAMA_BASE_URL = "http://localhost:11434"
-OLLAMA_MODEL = "deepseek-r1:1.5b"
+OLLAMA_BASE_URL = "http://localhost:11545"
+OLLAMA_MODEL = "qwen3-lora"
 REQUEST_TIMEOUT = 90  # R1 推理模型较慢，给足时间
 
 SYSTEM_PROMPT = """你是一个专业的反诈安全顾问助手「反诈护盾」。你的任务是帮助用户识别、预防和应对各类诈骗行为。
