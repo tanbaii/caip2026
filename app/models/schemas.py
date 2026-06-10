@@ -116,6 +116,8 @@ class ScenarioSummary(BaseModel):
     mode: str = "quiz"
     story: str | None = None
     objectives: list[str] = Field(default_factory=list)
+    max_score: int = Field(ge=0)
+    completion_bonus: int = Field(ge=0)
 
 
 class ScenarioStartRequest(BaseModel):
@@ -136,6 +138,10 @@ class ScenarioStartResponse(BaseModel):
     clues: list[dict[str, Any]] = Field(default_factory=list)
     objectives: list[str] = Field(default_factory=list)
     total_steps: int = Field(ge=1)
+    max_score: int = Field(ge=0)
+    previous_best: int = Field(ge=0)
+    attempts: int = Field(ge=0)
+    completed: bool = False
 
 
 class ScenarioAnswerRequest(BaseModel):
@@ -151,11 +157,32 @@ class ScenarioAnswerResponse(BaseModel):
     points_gained: int
     total_points: int
     badges: list[str]
+    new_badges: list[str] = Field(default_factory=list)
     next_prompt: str | None
     next_options: list[str]
     case_summary: str | None = None
     debrief: list[str] = Field(default_factory=list)
     total_steps: int = Field(ge=1)
+    run_score: int = Field(ge=0)
+    max_score: int = Field(ge=0)
+    score_percent: int = Field(ge=0, le=100)
+    best_score: int = Field(ge=0)
+    first_clear: bool = False
+    score_improvement: int = Field(ge=0)
+    attempts: int = Field(ge=0)
+    completions: int = Field(ge=0)
+
+
+class ScenarioProgressItem(BaseModel):
+    scenario_id: str
+    attempts: int = Field(ge=0)
+    completions: int = Field(ge=0)
+    best_score: int = Field(ge=0)
+    max_score: int = Field(ge=0)
+    best_percent: int = Field(ge=0, le=100)
+    points_earned: int = Field(ge=0)
+    first_completed_at: str | None = None
+    last_completed_at: str | None = None
 
 
 class UserProgressResponse(BaseModel):
@@ -166,6 +193,7 @@ class UserProgressResponse(BaseModel):
     reports_submitted: int
     scenarios_completed: int
     high_risk_blocks: int
+    scenario_progress: list[ScenarioProgressItem] = Field(default_factory=list)
 
 
 # ── 认证相关 ──

@@ -5,6 +5,10 @@
         <p class="section-kicker">Scenario Player</p>
         <h2 class="mt-1 text-2xl font-black text-slate-950">{{ scenario?.title || '选择一个关卡开始' }}</h2>
         <span v-if="scenario?.mode === 'case_mystery'" class="mt-1 inline-block rounded-full bg-purple-50 px-2.5 py-0.5 text-xs font-black text-purple-700 ring-1 ring-purple-100">剧本推理</span>
+        <p v-if="scenario && !scenario.finished" class="mt-2 text-sm font-bold text-slate-500">
+          本局 {{ safeNumber(scenario.run_score) }}/{{ safeNumber(scenario.max_score) }} 分
+          <span v-if="safeNumber(scenario.previous_best) > 0"> · 历史最佳 {{ safeNumber(scenario.previous_best) }}</span>
+        </p>
       </div>
       <BaseButton v-if="scenario" variant="secondary" @click="$emit('reset')">重新选择</BaseButton>
     </div>
@@ -96,11 +100,31 @@
         <!-- Completion -->
         <div v-if="scenario.finished" class="space-y-4">
           <div class="rounded-3xl border border-emerald-100 bg-gradient-to-br from-emerald-50 to-white p-6 text-emerald-800 shadow-lg shadow-emerald-100/60">
-            <p class="text-2xl font-black">闯关完成</p>
-            <p class="mt-2 text-sm font-bold">本次积分 +{{ safeNumber(scenario.points_gained) }}，当前总分 {{ safeNumber(scenario.total_points) }}</p>
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <p class="text-2xl font-black">闯关完成</p>
+              <StatusBadge :tone="scenario.first_clear ? 'success' : 'info'">{{ scenario.first_clear ? '首次通关' : `第 ${safeNumber(scenario.attempts)} 次挑战` }}</StatusBadge>
+            </div>
+            <div class="mt-4 grid gap-3 sm:grid-cols-3">
+              <div class="rounded-2xl bg-white/80 p-3">
+                <p class="text-xs font-black text-emerald-600">本局成绩</p>
+                <p class="mt-1 text-2xl font-black">{{ safeNumber(scenario.run_score) }}/{{ safeNumber(scenario.max_score) }}</p>
+              </div>
+              <div class="rounded-2xl bg-white/80 p-3">
+                <p class="text-xs font-black text-emerald-600">历史最佳</p>
+                <p class="mt-1 text-2xl font-black">{{ safeNumber(scenario.best_score) }}</p>
+              </div>
+              <div class="rounded-2xl bg-white/80 p-3">
+                <p class="text-xs font-black text-emerald-600">本次奖励</p>
+                <p class="mt-1 text-2xl font-black">+{{ safeNumber(scenario.points_gained) }}</p>
+              </div>
+            </div>
+            <p v-if="safeNumber(scenario.points_gained) > 0" class="mt-3 text-sm font-bold">
+              {{ scenario.first_clear ? '包含首次通关奖励与本局成绩分。' : `刷新最佳成绩 ${safeNumber(scenario.score_improvement)} 分，奖励对应增量。` }}当前总分 {{ safeNumber(scenario.total_points) }}。
+            </p>
+            <p v-else class="mt-3 text-sm font-bold">本次未超过历史最佳，不重复发放积分。当前总分 {{ safeNumber(scenario.total_points) }}。</p>
             <div class="mt-4 flex flex-wrap gap-2">
-              <StatusBadge v-for="badge in list(scenario.badges)" :key="badge" tone="success">{{ badge }}</StatusBadge>
-              <StatusBadge v-if="!list(scenario.badges).length" tone="muted">暂无新徽章</StatusBadge>
+              <StatusBadge v-for="badge in list(scenario.new_badges)" :key="badge" tone="success">新徽章：{{ badge }}</StatusBadge>
+              <StatusBadge v-if="!list(scenario.new_badges).length" tone="muted">本次暂无新徽章</StatusBadge>
             </div>
           </div>
 

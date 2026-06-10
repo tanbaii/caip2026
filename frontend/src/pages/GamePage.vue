@@ -1,5 +1,19 @@
 <template>
   <div class="page-shell">
+    <div v-if="progress" class="mb-6 grid gap-4 sm:grid-cols-3">
+      <BaseCard padding-class="p-5" class="bg-gradient-to-br from-blue-600 to-sky-500 text-white">
+        <p class="text-xs font-black uppercase tracking-widest text-blue-100">闯关进度</p>
+        <p class="mt-2 text-3xl font-black">{{ progress.scenarios_completed ?? 0 }} / {{ scenarios.length }}</p>
+      </BaseCard>
+      <BaseCard padding-class="p-5">
+        <p class="text-xs font-black uppercase tracking-widest text-slate-400">成长积分</p>
+        <p class="mt-2 text-3xl font-black text-blue-600">{{ progress.points ?? 0 }}</p>
+      </BaseCard>
+      <BaseCard padding-class="p-5">
+        <p class="text-xs font-black uppercase tracking-widest text-slate-400">奖励规则</p>
+        <p class="mt-2 text-sm font-black leading-6 text-slate-700">首次通关 +15，复玩仅奖励刷新最佳成绩的增量</p>
+      </BaseCard>
+    </div>
     <div class="grid gap-6 xl:grid-cols-[380px_minmax(0,1fr)]">
       <BaseCard padding-class="p-6" class="space-y-5">
         <div>
@@ -42,7 +56,7 @@ import { useAuth } from '../composables/useAuth.js'
 import { useScenario } from '../composables/useScenario.js'
 
 const { currentUser } = useAuth()
-const { scenarios, activeScenario, loading, error, loadScenarios, beginScenario, chooseOption, resetScenario } = useScenario(currentUser)
+const { scenarios, activeScenario, progress, loading, error, loadScenarios, beginScenario, chooseOption, resetScenario } = useScenario(currentUser)
 
 onMounted(loadScenarios)
 </script>

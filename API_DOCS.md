@@ -21,7 +21,7 @@
 | 7 | GET | `/scenarios` | `list_scenarios()` :138 | app.js:775 | 无 |
 | 8 | POST | `/scenarios/start` | `start_scenario()` | Vue scenario API | Bearer Token |
 | 9 | POST | `/scenarios/answer` | `answer_scenario()` | Vue scenario API | Bearer Token |
-| 10 | GET | `/users/{user_id}/progress` | `get_progress()` :161 | app.js:898 | 无 |
+| 10 | GET | `/users/{user_id}/progress` | `get_progress()` :161 | Vue profile/game API | Bearer Token |
 | 11 | GET | `/users/{user_id}/reports` | `get_user_reports()` | Vue report API | Bearer Token |
 | 12 | PATCH | `/reports/{report_id}/status` | `update_report_status()` | 管理端 | x-admin-token |
 | 12 | POST | `/auth/register` | `register()` :209 | app.js:297 | 无 |
@@ -274,6 +274,8 @@
 | id | str | 关卡 ID (如 C001) |
 | title | str | 关卡标题 |
 | scam_type | str | 骗局类型 |
+| max_score | int | 关卡最高答题分 |
+| completion_bonus | int | 首次通关固定奖励 |
 
 ---
 
@@ -305,6 +307,10 @@
 | step_index | int | 当前步骤 |
 | prompt | str | 题目文本 |
 | options | list[str] | 选项列表 |
+| max_score | int | 关卡最高答题分 |
+| previous_best | int | 用户历史最佳成绩 |
+| attempts | int | 历史挑战次数 |
+| completed | bool | 是否已经通关 |
 
 错误: 404 关卡不存在
 
@@ -340,8 +346,15 @@
 | points_gained | int | 本次积分 |
 | total_points | int | 总积分 |
 | badges | list[str] | 勋章列表 |
+| new_badges | list[str] | 本次新解锁勋章 |
 | next_prompt | str / null | 下一题文本 (finished=false 时) |
 | next_options | list[str] | 下一题选项 |
+| run_score / max_score | int | 本局成绩与关卡满分 |
+| score_percent | int | 本局得分百分比 |
+| best_score | int | 结算后的历史最佳成绩 |
+| first_clear | bool | 是否首次通关 |
+| score_improvement | int | 相比历史最佳提升的分数 |
+| attempts / completions | int | 挑战与完成次数 |
 
 错误: 400 参数错误 / 无进行中的关卡
 
@@ -365,6 +378,7 @@
 | badges | list[str] | 勋章列表 |
 | reports_submitted | int | 举报次数 |
 | scenarios_completed | int | 完成关卡数 |
+| scenario_progress | list | 每关挑战次数、最佳成绩、累计奖励和完成时间 |
 
 ---
 
@@ -527,8 +541,10 @@ GET /users/1/reports?limit=10&start_at=2026-04-01T00:00:00&end_at=2026-05-01T00:
 | knowledge_query | +5 |
 | report_submit | +12 |
 | risk_block | +20 |
-| scenario_step | 按选项 points |
-| scenario_complete | +15 |
+| scenario 首次通关 | 本局答题分 + 15 |
+| scenario 重复挑战 | 仅奖励超过历史最佳成绩的增量 |
+
+关卡积分在完成全部步骤后统一结算；重复获得相同或更低成绩不会增加积分，避免排行榜刷分。
 
 等级: `level = points // 100 + 1`
 

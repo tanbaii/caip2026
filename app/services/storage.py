@@ -62,11 +62,154 @@ class SQLiteStorage:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS scenario_progress (
+                    user_id INTEGER NOT NULL,
+                    scenario_id TEXT NOT NULL,
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    completions INTEGER NOT NULL DEFAULT 0,
+                    best_score INTEGER NOT NULL DEFAULT 0,
+                    max_score INTEGER NOT NULL DEFAULT 0,
+                    points_earned INTEGER NOT NULL DEFAULT 0,
+                    first_completed_at TEXT,
+                    last_completed_at TEXT,
+                    PRIMARY KEY (user_id, scenario_id)
+                )
+                """
+            )
             self._ensure_column(conn, "reports", "url_host", "TEXT")
             self._ensure_column(conn, "reports", "content_summary", "TEXT")
             self._ensure_column(conn, "reports", "reasons_json", "TEXT NOT NULL DEFAULT '[]'")
             self._ensure_column(conn, "reports", "status", "TEXT NOT NULL DEFAULT 'pending'")
             conn.commit()
+
+    def record_scenario_completion(
+        self,
+        user_id: int,
+        scenario_id: str,
+        score: int,
+        max_score: int,
+        completion_bonus: int,
+    ) -> dict[str, Any]:
+        normalized_score = max(0, int(score))
+        normalized_max = max(0, int(max_score))
+
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT attempts, completions, best_score, points_earned,
+                       first_completed_at, last_completed_at
+                FROM scenario_progress
+                WHERE user_id = ? AND scenario_id = ?
+                """,
+                (user_id, scenario_id),
+            ).fetchone()
+
+            first_clear = row is None
+            previous_best = int(row["best_score"]) if row else 0
+            improvement = max(0, normalized_score - previous_best)
+            points_gained = improvement + (max(0, int(completion_bonus)) if first_clear else 0)
+
+            if row:
+                conn.execute(
+                    """
+                    UPDATE scenario_progress
+                    SET attempts = attempts + 1,
+                        completions = completions + 1,
+                        best_score = MAX(best_score, ?),
+                        max_score = MAX(max_score, ?),
+                        points_earned = points_earned + ?,
+                        last_completed_at = CURRENT_TIMESTAMP
+                    WHERE user_id = ? AND scenario_id = ?
+                    """,
+                    (normalized_score, normalized_max, points_gained, user_id, scenario_id),
+                )
+            else:
+                conn.execute(
+                    """
+                    INSERT INTO scenario_progress (
+                        user_id, scenario_id, attempts, completions, best_score,
+                        max_score, points_earned, first_completed_at, last_completed_at
+                    )
+                    VALUES (?, ?, 1, 1, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """,
+                    (user_id, scenario_id, normalized_score, normalized_max, points_gained),
+                )
+
+            saved = conn.execute(
+                """
+                SELECT attempts, completions, best_score, max_score, points_earned,
+                       first_completed_at, last_completed_at
+                FROM scenario_progress
+                WHERE user_id = ? AND scenario_id = ?
+                """,
+                (user_id, scenario_id),
+            ).fetchone()
+            unique_completed = conn.execute(
+                "SELECT COUNT(*) FROM scenario_progress WHERE user_id = ? AND completions > 0",
+                (user_id,),
+            ).fetchone()[0]
+            conn.commit()
+
+        return {
+            "scenario_id": scenario_id,
+            "first_clear": first_clear,
+            "previous_best": previous_best,
+            "score_improvement": improvement,
+            "points_gained": points_gained,
+            "attempts": int(saved["attempts"]),
+            "completions": int(saved["completions"]),
+            "best_score": int(saved["best_score"]),
+            "max_score": int(saved["max_score"]),
+            "points_earned": int(saved["points_earned"]),
+            "first_completed_at": saved["first_completed_at"],
+            "last_completed_at": saved["last_completed_at"],
+            "unique_completed": int(unique_completed),
+        }
+
+    def get_scenario_progress(self, user_id: int, scenario_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT scenario_id, attempts, completions, best_score, max_score,
+                       points_earned, first_completed_at, last_completed_at
+                FROM scenario_progress
+                WHERE user_id = ? AND scenario_id = ?
+                """,
+                (user_id, scenario_id),
+            ).fetchone()
+        return self._scenario_progress_row(row) if row else None
+
+    def list_scenario_progress(self, user_id: int) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT scenario_id, attempts, completions, best_score, max_score,
+                       points_earned, first_completed_at, last_completed_at
+                FROM scenario_progress
+                WHERE user_id = ?
+                ORDER BY last_completed_at DESC, scenario_id ASC
+                """,
+                (user_id,),
+            ).fetchall()
+        return [self._scenario_progress_row(row) for row in rows]
+
+    @staticmethod
+    def _scenario_progress_row(row: sqlite3.Row) -> dict[str, Any]:
+        max_score = int(row["max_score"])
+        best_score = int(row["best_score"])
+        return {
+            "scenario_id": str(row["scenario_id"]),
+            "attempts": int(row["attempts"]),
+            "completions": int(row["completions"]),
+            "best_score": best_score,
+            "max_score": max_score,
+            "best_percent": round(best_score / max_score * 100) if max_score > 0 else 0,
+            "points_earned": int(row["points_earned"]),
+            "first_completed_at": row["first_completed_at"],
+            "last_completed_at": row["last_completed_at"],
+        }
 
     @staticmethod
     def _ensure_column(

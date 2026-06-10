@@ -56,13 +56,14 @@
 | 维度 | 内容 |
 |------|------|
 | **情景闯关** | 9 个剧本化情景推理关卡（C001-C009），含案件背景、角色扮演、线索收集、目标引导、案件复盘和反诈知识点；其中 C008（AI换脸借钱）和 C009（奖学金冒充通知）为完整剧本杀式推理模式 |
-| **积分体系** | 聊天研判、举报提交、闯关完成均可获得积分，积分实时累计 |
+| **积分体系** | 聊天研判、举报提交、闯关完成均可获得积分；关卡采用“首次通关奖励 + 最佳成绩增量”结算，相同成绩不可重复刷分 |
 | **勋章系统** | 达成条件自动授予勋章，展示在排行榜和个人主页 |
+| **成长记录** | 持久化每关挑战次数、最佳分、完成时间和累计奖励；关卡卡片、结算页与个人主页形成完整反馈闭环 |
 | **排行榜** | `/leaderboard` 全局排行，展示用户昵称、积分、等级、勋章 |
 | **泛终端适配** | Vue 3 + Tailwind CSS 4 响应式布局，适配桌面端和移动端；FastAPI 后端 RESTful API 适配网页/小程序/移动端接入 |
 | **演示入口** | `/game` 闯关页、`/leaderboard` 排行榜、`/profile` 个人主页 |
 | **相关文件** | `app/services/scenario_service.py`、`app/data/scenarios.json`、`app/services/gamification.py`、`frontend/src/pages/GamePage.vue`、`frontend/src/pages/LeaderboardPage.vue` |
-| **可验证证据** | `test_scenario_flow`：闯关流程完整；`test_scenarios_return_at_least_9`：9 个关卡；`test_c008_start_returns_story_role_objectives_clues`：剧本杀字段完整；`test_c008_finish_returns_case_summary_and_debrief`：复盘和知识点返回；`test_leaderboard_returns_data`：排行榜有数据 |
+| **可验证证据** | `test_scenario_flow`：闯关流程完整；`test_scenarios_return_at_least_9`：9 个关卡；`test_scenario_replay_cannot_farm_same_score`：相同成绩不可刷分；`test_scenario_replay_rewards_only_best_score_improvement`：复玩仅奖励最佳成绩增量；`test_leaderboard_returns_data`：排行榜有数据 |
 
 ---
 
@@ -104,14 +105,14 @@
 
 | 维度 | 说明 |
 |------|------|
-| **测试覆盖** | 86 个自动化测试（`pytest -q`），覆盖：API 端点、风险引擎、URL 检测、知识库、认证与越权防护、举报复核、排行榜、意图识别、JSON 配置加载、可解释输出、敏感信息脱敏、多轮对话与重置 |
+| **测试覆盖** | 88 个自动化测试（`pytest -q`），覆盖：API 端点、风险引擎、URL 检测、知识库、认证与越权防护、举报复核、排行榜、防刷分游戏化、意图识别、JSON 配置加载、可解释输出、敏感信息脱敏、多轮对话与重置 |
 | **测试隔离** | 每个测试使用独立临时数据库（`conftest.py`），测试间零状态污染 |
 | **代码规范** | Pydantic v2 Schema 校验所有入参和出参；类型注解全覆盖；模块化服务架构（RiskEngine、DialogueService、ReportService 独立可测） |
 | **配置管理** | 风险规则 JSON 配置化；数据库路径、JWT 密钥、管理员令牌、CORS 来源、限流参数均通过环境变量配置 |
 | **错误降级** | 配置文件缺失时回退内置默认规则；Ollama 未运行时返回降级提示；API 返回统一错误格式 |
 | **文档完整** | README（部署指南 + 烟雾测试）、SECURITY_DESIGN.md（安全设计）、USAGE_GUIDE.md（交互手册）、SCORING_ALIGNMENT.md（评分映射）、DEMO_SCRIPT.md（答辩脚本） |
 | **前端构建** | `npm run build` 通过，Vite 生产构建，CSS 7.96 KB + JS 56.15 KB（gzip） |
-| **可验证证据** | `pytest -q` → 86 passed；`npm run build` → 生产构建通过 |
+| **可验证证据** | `pytest -q` → 88 passed；`npm run build` → 生产构建通过 |
 
 ---
 
@@ -146,7 +147,7 @@
 
 ```bash
 # 后端测试
-pytest -q                           # 86 passed
+pytest -q                           # 88 passed
 
 # 前端构建
 cd frontend && npm run build        # built in ~30s

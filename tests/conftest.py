@@ -34,7 +34,7 @@ def _reset_db():
     """Re-initialise an empty database before every test so tests are isolated."""
     from app.main import storage
 
-    for table in ("users", "user_state", "reports"):
+    for table in ("users", "user_state", "reports", "scenario_progress"):
         with storage._connect() as conn:
             conn.execute(f"DELETE FROM {table}")
             conn.commit()

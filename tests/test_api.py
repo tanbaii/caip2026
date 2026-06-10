@@ -1462,6 +1462,61 @@ def test_scenario_responses_include_total_steps() -> None:
     assert answer.json()["total_steps"] == start.json()["total_steps"]
 
 
+def _finish_c001(user_id: int, choices: tuple[int, int]) -> dict:
+    started = client.post(
+        "/scenarios/start",
+        json={"user_id": user_id, "scenario_id": "C001"},
+    )
+    assert started.status_code == 200
+    client.post("/scenarios/answer", json={"user_id": user_id, "option_index": choices[0]})
+    finished = client.post(
+        "/scenarios/answer",
+        json={"user_id": user_id, "option_index": choices[1]},
+    )
+    assert finished.status_code == 200
+    return finished.json()
+
+
+def test_scenario_replay_cannot_farm_same_score() -> None:
+    user_id = 9701
+    first = _finish_c001(user_id, (1, 1))
+    second = _finish_c001(user_id, (1, 1))
+
+    assert first["first_clear"] is True
+    assert first["run_score"] == first["max_score"] == 25
+    assert first["points_gained"] == 40
+    assert second["first_clear"] is False
+    assert second["points_gained"] == 0
+    assert second["score_improvement"] == 0
+    assert second["attempts"] == 2
+    assert second["total_points"] == first["total_points"]
+
+    progress = client.get(f"/users/{user_id}/progress").json()
+    assert progress["scenarios_completed"] == 1
+    assert progress["scenario_progress"][0]["best_percent"] == 100
+    assert progress["scenario_progress"][0]["attempts"] == 2
+
+
+def test_scenario_replay_rewards_only_best_score_improvement() -> None:
+    user_id = 9702
+    first = _finish_c001(user_id, (0, 0))
+    improved = _finish_c001(user_id, (1, 1))
+    repeated = _finish_c001(user_id, (1, 1))
+
+    assert first["points_gained"] == 15
+    assert improved["first_clear"] is False
+    assert improved["score_improvement"] == 25
+    assert improved["points_gained"] == 25
+    assert improved["best_score"] == 25
+    assert repeated["points_gained"] == 0
+
+    progress = client.get(f"/users/{user_id}/progress").json()
+    record = progress["scenario_progress"][0]
+    assert record["scenario_id"] == "C001"
+    assert record["attempts"] == 3
+    assert record["points_earned"] == 40
+
+
 def test_new_password_hash_uses_random_salt() -> None:
     from app.main import storage
 
