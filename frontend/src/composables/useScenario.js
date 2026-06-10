@@ -75,7 +75,8 @@ export function useScenario(userRef) {
       activeScenario.value = {
         ...activeScenario.value,
         scenario_id: data.scenario_id,
-        step_index: data.step_index,
+        step_index: data.finished ? data.step_index : data.step_index + 1,
+        total_steps: Number(data.total_steps) || activeScenario.value.total_steps || 1,
         prompt: data.next_prompt || activeScenario.value.prompt,
         options: Array.isArray(data.next_options) ? data.next_options : [],
         finished: Boolean(data.finished),

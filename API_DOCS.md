@@ -12,16 +12,18 @@
 | # | 方法 | 路径 | 后端函数 (main.py) | 前端调用 | 鉴权 |
 |---|------|------|---------------------|----------|------|
 | 1 | GET | `/health` | `health()` :92 | app.js:676 | 无 |
-| 2 | POST | `/chat` | `chat()` :97 | app.js:702 | 无 |
-| 3 | POST | `/report` | `report()` :102 | app.js:744 | 无 |
+| 2 | POST | `/chat` | `chat()` | Vue chat API | Bearer Token |
+| 3 | POST | `/chat/reset` | `reset_chat()` | Vue chat API | Bearer Token |
+| 4 | POST | `/report` | `report()` | Vue report API | Bearer Token |
 | 4 | GET | `/knowledge/scams` | `list_scams()` :112 | app.js:630 | 无 |
 | 5 | GET | `/knowledge/laws` | `list_laws()` :117 | app.js:631 | 无 |
 | 6 | POST | `/knowledge/scams` | `add_scam()` :122 | 无 (管理员) | x-admin-token |
 | 7 | GET | `/scenarios` | `list_scenarios()` :138 | app.js:775 | 无 |
-| 8 | POST | `/scenarios/start` | `start_scenario()` :143 | app.js:844 | 无 |
-| 9 | POST | `/scenarios/answer` | `answer_scenario()` :152 | app.js:881 | 无 |
+| 8 | POST | `/scenarios/start` | `start_scenario()` | Vue scenario API | Bearer Token |
+| 9 | POST | `/scenarios/answer` | `answer_scenario()` | Vue scenario API | Bearer Token |
 | 10 | GET | `/users/{user_id}/progress` | `get_progress()` :161 | app.js:898 | 无 |
-| 11 | GET | `/users/{user_id}/reports` | `get_user_reports()` :179 | app.js:938 | 无 |
+| 11 | GET | `/users/{user_id}/reports` | `get_user_reports()` | Vue report API | Bearer Token |
+| 12 | PATCH | `/reports/{report_id}/status` | `update_report_status()` | 管理端 | x-admin-token |
 | 12 | POST | `/auth/register` | `register()` :209 | app.js:297 | 无 |
 | 13 | POST | `/auth/login` | `login()` :223 | app.js:248 | 无 |
 | 14 | GET | `/auth/me` | `get_me()` :232 | app.js:127 | Bearer Token |

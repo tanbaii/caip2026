@@ -1326,3 +1326,160 @@ def test_chat_workflow_runner_preserves_chat_contract() -> None:
     assert data["matched_scams"]
     assert "retrieved_knowledge" in data
     assert isinstance(data["reply"], str)
+
+
+def test_chat_reset_clears_server_side_state() -> None:
+    user_id = 9601
+    first = client.post("/chat", json={
+        "user_id": user_id,
+        "message": "有人冒充公安让我转账到安全账户",
+        "user_profile": {"role": "student"},
+    })
+    assert first.status_code == 200
+    assert first.json()["known_facts"].get("mentions_authority") is True
+
+    reset = client.post("/chat/reset", json={"user_id": user_id})
+    assert reset.status_code == 200
+
+    second = client.post("/chat", json={
+        "user_id": user_id,
+        "message": "你好，我想学习反诈知识",
+        "user_profile": {"role": "student"},
+    })
+    assert second.status_code == 200
+    data = second.json()
+    assert data["turn_count"] == 1
+    assert data["known_facts"].get("mentions_authority") is not True
+
+
+def test_protected_routes_bind_token_user(monkeypatch) -> None:
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "REQUIRE_AUTH", True)
+    registered = client.post("/auth/register", json={
+        "username": "bound_user",
+        "password": "demo123456",
+        "role": "student",
+    })
+    assert registered.status_code == 200
+    auth = registered.json()
+    headers = {"Authorization": f"Bearer {auth['access_token']}"}
+
+    missing = client.post("/chat", json={"user_id": auth["user_id"], "message": "你好"})
+    assert missing.status_code == 401
+
+    mismatched = client.post(
+        "/chat",
+        headers=headers,
+        json={"user_id": auth["user_id"] + 1, "message": "你好"},
+    )
+    assert mismatched.status_code == 403
+
+    allowed = client.post(
+        "/chat",
+        headers=headers,
+        json={"user_id": auth["user_id"], "message": "你好"},
+    )
+    assert allowed.status_code == 200
+
+
+def test_report_history_stores_only_sanitized_summary() -> None:
+    user_id = 9602
+    response = client.post("/report", json={
+        "user_id": user_id,
+        "url": "http://xn--secure-bank-5k9f.top/login?token=secret",
+        "content": "验证码:123456，手机号13812345678，银行卡6222021234567890，点击领取返利",
+    })
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending"
+
+    history = client.get(f"/users/{user_id}/reports").json()["items"][0]
+    assert history["url_host"] == "xn--secure-bank-5k9f.top"
+    assert "secret" not in (history["url_host"] or "")
+    assert "123456" not in history["content_summary"]
+    assert "13812345678" not in history["content_summary"]
+    assert "6222021234567890" not in history["content_summary"]
+    assert "******" in history["content_summary"]
+    assert history["status"] == "pending"
+    assert isinstance(history["reasons"], list)
+
+
+def test_admin_can_review_report_status() -> None:
+    from app.main import ADMIN_TOKEN
+
+    user_id = 9605
+    created = client.post("/report", json={
+        "user_id": user_id,
+        "content": "有人让我先转保证金再返利",
+    })
+    report_id = created.json()["report_id"]
+
+    denied = client.patch(
+        f"/reports/{report_id}/status",
+        json={"status": "reviewed"},
+    )
+    assert denied.status_code == 401
+
+    updated = client.patch(
+        f"/reports/{report_id}/status",
+        headers={"x-admin-token": ADMIN_TOKEN},
+        json={"status": "reviewed"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["status"] == "reviewed"
+
+    history = client.get(f"/users/{user_id}/reports").json()["items"]
+    assert history[0]["status"] == "reviewed"
+
+
+def test_progress_includes_high_risk_blocks() -> None:
+    user_id = 9603
+    response = client.post("/chat", json={
+        "user_id": user_id,
+        "message": "公检法让我马上转账到安全账户并提供验证码",
+        "user_profile": {"role": "student"},
+    })
+    assert response.status_code == 200
+
+    progress = client.get(f"/users/{user_id}/progress")
+    assert progress.status_code == 200
+    assert progress.json()["high_risk_blocks"] >= 1
+
+
+def test_scenario_responses_include_total_steps() -> None:
+    start = client.post(
+        "/scenarios/start",
+        json={"user_id": 9604, "scenario_id": "C008"},
+    )
+    assert start.status_code == 200
+    assert start.json()["total_steps"] >= 3
+
+    answer = client.post(
+        "/scenarios/answer",
+        json={"user_id": 9604, "option_index": 1},
+    )
+    assert answer.status_code == 200
+    assert answer.json()["total_steps"] == start.json()["total_steps"]
+
+
+def test_new_password_hash_uses_random_salt() -> None:
+    from app.main import storage
+
+    first = client.post("/auth/register", json={
+        "username": "pbkdf2_user_one",
+        "password": "same-password",
+    }).json()
+    second = client.post("/auth/register", json={
+        "username": "pbkdf2_user_two",
+        "password": "same-password",
+    }).json()
+
+    first_hash = storage.get_user_by_id(first["user_id"])
+    second_hash = storage.get_user_by_id(second["user_id"])
+    assert first_hash is not None and second_hash is not None
+
+    stored_first = storage.get_user_by_username("pbkdf2_user_one")["password_hash"]
+    stored_second = storage.get_user_by_username("pbkdf2_user_two")["password_hash"]
+    assert stored_first.startswith("pbkdf2_sha256$")
+    assert stored_second.startswith("pbkdf2_sha256$")
+    assert stored_first != stored_second

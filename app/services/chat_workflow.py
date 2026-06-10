@@ -67,6 +67,9 @@ class ChatWorkflowRunner:
             final_state = self._invoke_sequential(initial_state)
         return final_state["response"]
 
+    def reset_conversation(self, user_id: int) -> None:
+        self.service.reset_conversation(user_id)
+
     def _compile_graph(self) -> Any | None:
         if StateGraph is None:
             return None

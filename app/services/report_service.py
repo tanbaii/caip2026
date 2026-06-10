@@ -3,9 +3,11 @@ from __future__ import annotations
 import re
 import uuid
 from typing import TYPE_CHECKING
+from urllib.parse import urlparse
 
 from app.services.gamification import GamificationService
 from app.services.risk_engine import RiskEngine
+from app.services.sanitizer import sanitize_text
 
 if TYPE_CHECKING:
     from app.services.storage import SQLiteStorage
@@ -67,7 +69,7 @@ class ReportService:
         if content:
             content_lower = content.lower()
             for word in self.keyword_blacklist:
-                if word in content_lower:
+                if word.lower() in content_lower:
                     content_score += 8
                     matched_keywords.append(word)
                     matched_rules.append({
@@ -100,6 +102,8 @@ class ReportService:
             url_flags.append("未提供URL或URL未命中明显风险")
 
         report_id = uuid.uuid4().hex[:12]
+        url_host = self._extract_url_host(url)
+        content_summary = sanitize_text(content)[:240] if content else None
         report_record = {
             "report_id": report_id,
             "user_id": user_id,
@@ -115,6 +119,10 @@ class ReportService:
                 score=score,
                 verdict=verdict,
                 matched_keywords=matched_keywords,
+                url_host=url_host,
+                content_summary=content_summary,
+                reasons=reasons,
+                status="pending",
             )
         self.gamification.award(user_id, action="report_submit")
 
@@ -133,6 +141,7 @@ class ReportService:
                 "total": score,
             },
             "next_actions": self._build_next_actions(verdict),
+            "status": "pending",
         }
 
     def list_reports(
@@ -159,6 +168,14 @@ class ReportService:
         if score >= 25:
             return "suspicious"
         return "safe"
+
+    @staticmethod
+    def _extract_url_host(url: str | None) -> str | None:
+        if not url:
+            return None
+        has_protocol = bool(re.match(r"^https?://", url, flags=re.IGNORECASE))
+        parsed = urlparse(url if has_protocol else f"http://{url}")
+        return (parsed.hostname or "")[:253] or None
 
     @staticmethod
     def _build_recommendations(verdict: str) -> list[str]:

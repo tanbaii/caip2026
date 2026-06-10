@@ -43,6 +43,10 @@ class ChatResponse(BaseModel):
     retrieved_knowledge: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class ChatResetRequest(BaseModel):
+    user_id: int = Field(ge=1)
+
+
 class ReportRequest(BaseModel):
     user_id: int = Field(ge=1)
     url: str | None = Field(default=None, max_length=2048)
@@ -67,6 +71,7 @@ class ReportResponse(BaseModel):
     matched_rules: list[dict[str, Any]] = Field(default_factory=list)
     risk_breakdown: dict[str, Any] = Field(default_factory=dict)
     next_actions: list[str] = Field(default_factory=list)
+    status: Literal["pending", "reviewed", "closed"] = "pending"
 
 
 class ReportHistoryItem(BaseModel):
@@ -75,6 +80,10 @@ class ReportHistoryItem(BaseModel):
     score: int
     verdict: Literal["safe", "suspicious", "high_risk"]
     matched_keywords: list[str]
+    url_host: str | None = None
+    content_summary: str | None = None
+    reasons: list[str] = Field(default_factory=list)
+    status: Literal["pending", "reviewed", "closed"] = "pending"
     created_at: str
 
 
@@ -82,6 +91,10 @@ class ReportHistoryResponse(BaseModel):
     user_id: int
     total: int
     items: list[ReportHistoryItem]
+
+
+class ReportStatusUpdate(BaseModel):
+    status: Literal["pending", "reviewed", "closed"]
 
 
 class ScamEntryCreate(BaseModel):
@@ -122,6 +135,7 @@ class ScenarioStartResponse(BaseModel):
     characters: list[dict[str, Any]] = Field(default_factory=list)
     clues: list[dict[str, Any]] = Field(default_factory=list)
     objectives: list[str] = Field(default_factory=list)
+    total_steps: int = Field(ge=1)
 
 
 class ScenarioAnswerRequest(BaseModel):
@@ -141,6 +155,7 @@ class ScenarioAnswerResponse(BaseModel):
     next_options: list[str]
     case_summary: str | None = None
     debrief: list[str] = Field(default_factory=list)
+    total_steps: int = Field(ge=1)
 
 
 class UserProgressResponse(BaseModel):
@@ -150,6 +165,7 @@ class UserProgressResponse(BaseModel):
     badges: list[str]
     reports_submitted: int
     scenarios_completed: int
+    high_risk_blocks: int
 
 
 # ── 认证相关 ──

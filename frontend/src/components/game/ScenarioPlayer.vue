@@ -81,7 +81,7 @@
           <div class="flex items-center justify-between gap-4">
             <p class="text-xs font-black uppercase tracking-widest text-blue-600">Step {{ safeNumber(scenario.step_index) + 1 }}</p>
             <div class="h-2 w-28 overflow-hidden rounded-full bg-blue-100">
-              <div class="h-full rounded-full bg-blue-600" :style="{ width: `${Math.min((safeNumber(scenario.step_index) + 1) * 50, 100)}%` }" />
+              <div class="h-full rounded-full bg-blue-600" :style="{ width: `${stepProgress}%` }" />
             </div>
           </div>
           <p class="mt-4 break-words text-xl font-black leading-9 text-slate-800">{{ scenario.prompt || '暂无剧情内容' }}</p>
@@ -142,7 +142,7 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import BaseButton from '../common/BaseButton.vue'
 import BaseCard from '../common/BaseCard.vue'
 import StatusBadge from '../common/StatusBadge.vue'
@@ -162,6 +162,12 @@ defineEmits(['answer', 'reset'])
 
 const showIntro = ref(false)
 const lastScenarioId = ref(null)
+
+const stepProgress = computed(() => {
+  const total = Math.max(1, safeNumber(props.scenario?.total_steps))
+  const current = Math.min(total, safeNumber(props.scenario?.step_index) + 1)
+  return Math.round((current / total) * 100)
+})
 
 watch(() => props.scenario, (val) => {
   if (!val) {

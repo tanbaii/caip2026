@@ -28,6 +28,15 @@ function safeText(value, fallback = "-") {
   return String(value);
 }
 
+function escapeHtml(value, fallback = "-") {
+  return safeText(value, fallback)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
 function renderLines(lines) {
   if (!Array.isArray(lines) || lines.length === 0) {
     return "-";
@@ -340,8 +349,10 @@ function createAIBubble(role, content) {
 
   const bubbleContent = document.createElement("div");
   bubbleContent.className = "bubble-content";
-  // 支持简单换行渲染
-  bubbleContent.innerHTML = content.replace(/\n/g, "<br>");
+  String(content).split("\n").forEach((line, index) => {
+    if (index > 0) bubbleContent.appendChild(document.createElement("br"));
+    bubbleContent.appendChild(document.createTextNode(line));
+  });
 
   wrapper.appendChild(avatar);
   wrapper.appendChild(bubbleContent);
@@ -461,11 +472,11 @@ function renderLeaderboard(data) {
 
     tr.innerHTML = `
       <td>${rankCell}</td>
-      <td>${safeText(entry.nickname || entry.username)}</td>
+      <td>${escapeHtml(entry.nickname || entry.username)}</td>
       <td>${roleLabel}</td>
       <td class="num">Lv.${entry.level}</td>
       <td class="num">${entry.points}</td>
-      <td><span class="badge-tags">${badgesText}</span></td>`;
+      <td><span class="badge-tags">${escapeHtml(badgesText)}</span></td>`;
     tbody.appendChild(tr);
   });
 

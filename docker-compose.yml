@@ -31,6 +31,7 @@ services:
       ANTI_FRAUD_ADMIN_TOKEN: ${ANTI_FRAUD_ADMIN_TOKEN:-change-me}
       JWT_SECRET: ${JWT_SECRET:-anti-fraud-lab-secret-key-change-in-production-2024}
       RATE_LIMIT_RPM: ${RATE_LIMIT_RPM:-0}
+      REQUIRE_AUTH: ${REQUIRE_AUTH:-1}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:8000,http://127.0.0.1:8000}
       CHAT_FLOW_ENGINE: ${CHAT_FLOW_ENGINE:-classic}
       CHAT_LLM_ENABLED: ${CHAT_LLM_ENABLED:-0}

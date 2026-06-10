@@ -111,6 +111,7 @@ echo "TOKEN=${TOKEN:0:20}..."
 ```bash
 curl -s -X POST http://127.0.0.1:8000/chat \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "{
     \"user_id\": $USER_ID,
     \"message\": \"有人让我先垫付刷单，说完成后返利\",
@@ -132,6 +133,7 @@ curl -s -X POST http://127.0.0.1:8000/chat \
 ```bash
 curl -s -X POST http://127.0.0.1:8000/report \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "{
     \"user_id\": $USER_ID,
     \"url\": \"http://xn--secure-bank-5k9f.top/login@notice\",
@@ -155,20 +157,24 @@ curl -s http://127.0.0.1:8000/scenarios
 # 开始 C001
 curl -s -X POST http://127.0.0.1:8000/scenarios/start \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "{\"user_id\": $USER_ID, \"scenario_id\": \"C001\"}"
 
 # 回答第 1 题（option_index 按返回选项序号填写）
 curl -s -X POST http://127.0.0.1:8000/scenarios/answer \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "{\"user_id\": $USER_ID, \"option_index\": 1}"
 ```
 
 ### 3.5 查看进度、历史与排行榜
 
 ```bash
-curl -s "http://127.0.0.1:8000/users/$USER_ID/progress"
+curl -s "http://127.0.0.1:8000/users/$USER_ID/progress" \
+  -H "Authorization: Bearer $TOKEN"
 
-curl -s "http://127.0.0.1:8000/users/$USER_ID/reports?limit=10"
+curl -s "http://127.0.0.1:8000/users/$USER_ID/reports?limit=10" \
+  -H "Authorization: Bearer $TOKEN"
 
 curl -s "http://127.0.0.1:8000/leaderboard?top=20"
 ```
@@ -178,6 +184,8 @@ curl -s "http://127.0.0.1:8000/leaderboard?top=20"
 ## 4. 管理员：新增骗局知识
 
 `POST /knowledge/scams` 需要请求头 `x-admin-token`。
+
+管理员还可通过 `PATCH /reports/{report_id}/status` 将举报标记为 `pending`、`reviewed` 或 `closed`。
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/knowledge/scams \
@@ -241,7 +249,7 @@ python scripts/benchmark_api.py \
 pytest -q
 ```
 
-当前仓库实测结果：**71 个通过，0 个失败**
+当前仓库实测结果：**86 个通过，0 个失败**
 
 ---
 

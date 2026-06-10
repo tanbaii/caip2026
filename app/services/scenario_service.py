@@ -50,6 +50,7 @@ class ScenarioService:
             "characters": scenario.get("characters", []),
             "clues": scenario.get("clues", []),
             "objectives": scenario.get("objectives", []),
+            "total_steps": len(scenario["steps"]),
         }
 
     def answer(self, user_id: int, option_index: int) -> dict[str, Any]:
@@ -101,6 +102,7 @@ class ScenarioService:
             "badges": list(reward_result["badges"]),
             "next_prompt": next_prompt,
             "next_options": next_options,
+            "total_steps": len(scenario["steps"]),
         }
 
         if finished:

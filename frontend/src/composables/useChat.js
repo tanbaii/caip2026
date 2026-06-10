@@ -1,5 +1,5 @@
 import { ref } from 'vue'
-import { sendRiskChat } from '../api/chat.js'
+import { resetRiskChat, sendRiskChat } from '../api/chat.js'
 
 const welcomeMessage = {
   id: 'welcome',
@@ -73,10 +73,22 @@ export function useChat(userRef) {
     }
   }
 
-  function resetChat() {
+  async function resetChat() {
+    const userId = Number(userRef?.value?.user_id) || 0
+    let resetFailed = false
+    if (userId) {
+      try {
+        await resetRiskChat(userId)
+      } catch (err) {
+        error.value = err.message || '服务端对话状态重置失败'
+        resetFailed = true
+      }
+    }
     messages.value = [welcomeMessage]
     latestRisk.value = null
-    error.value = ''
+    if (!resetFailed) {
+      error.value = ''
+    }
   }
 
   return {

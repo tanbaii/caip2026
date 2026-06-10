@@ -20,8 +20,8 @@
 ```
 
 - **风险识别在脱敏之前**：确保"验证码"、"安全账户"等诈骗关键词匹配不被掩码破坏。
-- **脱敏在入库之前**：存储在内存历史和 SQLite 中的用户消息均为脱敏后的文本。
-- **脱敏在响应返回之前**：API 响应中不包含原始敏感信息。
+- **脱敏在记录之前**：多轮对话内存历史只保留脱敏文本；举报表只保存 URL 主机和最多 240 字的脱敏摘要，不保存完整 URL 与原始正文。
+- **最小化响应**：风险接口返回判定和解释字段，不回传请求中的原始敏感内容。
 
 ### 1.3 实现位置
 
@@ -35,10 +35,10 @@
 
 ### 2.1 密码存储
 
-- 使用 SHA-256 + 盐值派生哈希：`sha256$<salt>$<hash>`
-- 盐值由密码本身的 SHA-256 摘要前16位生成
+- 使用 PBKDF2-HMAC-SHA256：`pbkdf2_sha256$<iterations>$<salt>$<hash>`
+- 每个账户使用 16 字节随机盐，默认执行 210,000 次迭代
 - 验证时使用 `hmac.compare_digest` 防止时序攻击
-- **生产建议**：迁移到 bcrypt/argon2id
+- 兼容旧 `sha256$...` 账户，登录成功后自动迁移为 PBKDF2
 
 ### 2.2 JWT 令牌
 
@@ -53,10 +53,13 @@
 
 | 接口 | 认证要求 |
 |------|---------|
-| `/chat`、`/report`、`/scenarios/*` | 无（教育演示系统，user_id 由客户端提供） |
+| `/chat`、`/chat/reset`、`/report`、`/scenarios/*` | 默认需要 Bearer Token，且 Token 用户必须与 `user_id` 一致 |
 | `/auth/me` | 需要 `Authorization: Bearer <token>` |
 | `/knowledge/scams`（POST） | 需要 `x-admin-token` 管理员令牌 |
-| `/leaderboard`、`/users/*/progress` | 无（公开排行数据） |
+| `/users/*/progress`、`/users/*/reports` | 默认需要 Bearer Token，并阻止跨用户读取 |
+| `/leaderboard`、知识库只读接口、关卡列表 | 公开只读 |
+
+可通过 `REQUIRE_AUTH=0` 仅在自动化测试或隔离演示环境中关闭强制鉴权；生产默认值为 `1`。
 
 ---
 
@@ -70,7 +73,8 @@
 
 ### 3.2 受限操作
 
-- **唯一管理员接口**：`POST /knowledge/scams`（新增骗局知识条目）
+- 管理员知识接口：`POST /knowledge/scams`（新增骗局知识条目）
+- 举报复核接口：`PATCH /reports/{report_id}/status`，仅允许管理员更新处理状态
 - 令牌不匹配时返回 `401 Unauthorized`
 - 不提供用户管理、数据删除、配置修改等管理员功能
 - 所有知识库变更均需前端/客户端主动提交

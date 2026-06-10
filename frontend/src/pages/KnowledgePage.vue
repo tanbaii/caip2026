@@ -57,7 +57,11 @@
       <div v-else class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <BaseCard v-for="law in filteredLaws" :key="law.id || law.title || law.name" padding-class="p-5" class="space-y-3">
           <h3 class="text-lg font-black text-slate-900">{{ law.title || law.name || law.id || '法律条目' }}</h3>
-          <p class="text-sm font-semibold leading-7 text-slate-600">{{ law.content || law.summary || law.description || law.text || '暂无说明。' }}</p>
+          <p v-if="law.content || law.summary || law.description || law.text" class="text-sm font-semibold leading-7 text-slate-600">{{ law.content || law.summary || law.description || law.text }}</p>
+          <ul v-else-if="list(law.highlights).length" class="space-y-2">
+            <li v-for="(item, index) in list(law.highlights)" :key="index" class="rounded-2xl bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-600">{{ item }}</li>
+          </ul>
+          <p v-else class="text-sm font-semibold leading-7 text-slate-400">暂无说明。</p>
         </BaseCard>
       </div>
     </section>

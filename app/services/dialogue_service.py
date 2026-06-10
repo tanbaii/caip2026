@@ -33,6 +33,10 @@ class DialogueService:
         self._url_pattern = re.compile(r"(https?://\S+|www\.\S+)", re.IGNORECASE)
         self._conv_state = ConversationStateManager()
 
+    def reset_conversation(self, user_id: int) -> None:
+        self._history.pop(user_id, None)
+        self._conv_state.reset(user_id)
+
     def process_chat(self, request: ChatRequest) -> dict[str, Any]:
         start_time = time.perf_counter()
         history = self._history.get(request.user_id, [])

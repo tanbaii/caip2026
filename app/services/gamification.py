@@ -77,6 +77,7 @@ class GamificationService:
             "badges": list(state["badges"]),
             "reports_submitted": int(state["reports_submitted"]),
             "scenarios_completed": int(state["scenarios_completed"]),
+            "high_risk_blocks": int(state["high_risk_blocks"]),
         }
 
     @staticmethod

@@ -17,10 +17,11 @@
       <div class="rounded-3xl p-5 ring-1 shadow-sm" :class="scoreClass">
         <p class="text-xs font-black uppercase tracking-widest">风险分</p>
         <div class="mt-2 flex items-end gap-2">
-          <p class="text-5xl font-black tracking-tighter">{{ safeNumber(result.risk_score) }}</p>
+          <p class="text-5xl font-black tracking-tighter">{{ normalizedScore }}</p>
           <span class="pb-2 text-sm font-black opacity-60">/ 100</span>
         </div>
         <p class="mt-3 min-w-0 break-words text-sm font-semibold">举报单号：{{ result.report_id || '-' }}</p>
+        <p v-if="safeNumber(result.risk_score) > 100" class="mt-2 text-xs font-bold opacity-70">规则累计 {{ safeNumber(result.risk_score) }} 分，展示值已归一化为 100。</p>
       </div>
 
       <section class="space-y-3">
@@ -155,4 +156,6 @@ const scoreClass = computed(() => {
   if (props.result?.verdict === 'suspicious') return 'bg-orange-50 text-orange-700 ring-orange-100'
   return 'bg-emerald-50 text-emerald-700 ring-emerald-100'
 })
+
+const normalizedScore = computed(() => Math.min(100, Math.max(0, safeNumber(props.result?.risk_score))))
 </script>

@@ -54,11 +54,30 @@ class SQLiteStorage:
                     score INTEGER NOT NULL,
                     verdict TEXT NOT NULL,
                     matched_keywords_json TEXT NOT NULL,
+                    url_host TEXT,
+                    content_summary TEXT,
+                    reasons_json TEXT NOT NULL DEFAULT '[]',
+                    status TEXT NOT NULL DEFAULT 'pending',
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
+            self._ensure_column(conn, "reports", "url_host", "TEXT")
+            self._ensure_column(conn, "reports", "content_summary", "TEXT")
+            self._ensure_column(conn, "reports", "reasons_json", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column(conn, "reports", "status", "TEXT NOT NULL DEFAULT 'pending'")
             conn.commit()
+
+    @staticmethod
+    def _ensure_column(
+        conn: sqlite3.Connection,
+        table: str,
+        column: str,
+        definition: str,
+    ) -> None:
+        columns = {str(row[1]) for row in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in columns:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
     def load_user_state(self, user_id: int) -> dict[str, Any] | None:
         with self._connect() as conn:
@@ -124,12 +143,19 @@ class SQLiteStorage:
         score: int,
         verdict: str,
         matched_keywords: list[str],
+        url_host: str | None = None,
+        content_summary: str | None = None,
+        reasons: list[str] | None = None,
+        status: str = "pending",
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
-                INSERT INTO reports (report_id, user_id, score, verdict, matched_keywords_json)
-                VALUES (?, ?, ?, ?, ?)
+                INSERT INTO reports (
+                    report_id, user_id, score, verdict, matched_keywords_json,
+                    url_host, content_summary, reasons_json, status
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     report_id,
@@ -137,6 +163,10 @@ class SQLiteStorage:
                     int(score),
                     verdict,
                     json.dumps(sorted(set(matched_keywords)), ensure_ascii=False),
+                    url_host,
+                    content_summary,
+                    json.dumps(reasons or [], ensure_ascii=False),
+                    status,
                 ),
             )
             conn.commit()
@@ -151,7 +181,8 @@ class SQLiteStorage:
         normalized_limit = max(1, min(100, int(limit)))
         sql = (
             """
-            SELECT report_id, user_id, score, verdict, matched_keywords_json, created_at
+            SELECT report_id, user_id, score, verdict, matched_keywords_json,
+                   url_host, content_summary, reasons_json, status, created_at
             FROM reports
             WHERE user_id = ?
             """
@@ -175,14 +206,27 @@ class SQLiteStorage:
         return [
             {
                 "report_id": str(row["report_id"]),
-                "user_id": str(row["user_id"]),
+                "user_id": int(row["user_id"]),
                 "score": int(row["score"]),
                 "verdict": str(row["verdict"]),
                 "matched_keywords": json.loads(row["matched_keywords_json"]),
+                "url_host": str(row["url_host"]) if row["url_host"] else None,
+                "content_summary": str(row["content_summary"]) if row["content_summary"] else None,
+                "reasons": json.loads(row["reasons_json"] or "[]"),
+                "status": str(row["status"] or "pending"),
                 "created_at": str(row["created_at"]),
             }
             for row in rows
         ]
+
+    def update_report_status(self, report_id: str, status: str) -> bool:
+        with self._connect() as conn:
+            cursor = conn.execute(
+                "UPDATE reports SET status = ? WHERE report_id = ?",
+                (status, report_id),
+            )
+            conn.commit()
+        return cursor.rowcount > 0
 
     # ── 用户认证 CRUD ──
 
@@ -237,6 +281,14 @@ class SQLiteStorage:
             "nickname": row["nickname"],
             "created_at": str(row["created_at"]),
         }
+
+    def update_password_hash(self, user_id: int, password_hash: str) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                "UPDATE users SET password_hash = ? WHERE id = ?",
+                (password_hash, user_id),
+            )
+            conn.commit()
 
     def get_leaderboard(self, limit: int = 20) -> list[dict[str, Any]]:
         normalized_limit = max(1, min(100, limit))

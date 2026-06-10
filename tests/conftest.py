@@ -15,6 +15,7 @@ os.environ["CHAT_LLM_ENABLED"] = "0"
 os.environ["RAG_LLM_ENABLED"] = "0"
 os.environ["RAG_RETRIEVAL_ENABLED"] = "0"
 os.environ["CHAT_FLOW_ENGINE"] = "classic"
+os.environ["REQUIRE_AUTH"] = "0"
 
 import pytest  # noqa: E402
 

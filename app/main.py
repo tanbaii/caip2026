@@ -14,6 +14,7 @@ from app.models.schemas import (
     AIChatRequest,
     AIChatResponse,
     ChatRequest,
+    ChatResetRequest,
     ChatResponse,
     LeaderboardResponse,
     LoginRequest,
@@ -23,6 +24,7 @@ from app.models.schemas import (
     ReportResponse,
     ReportHistoryResponse,
     ScamEntryCreate,
+    ReportStatusUpdate,
     ScenarioAnswerRequest,
     ScenarioAnswerResponse,
     ScenarioStartRequest,
@@ -52,7 +54,7 @@ FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
 FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
 LEGACY_WEB_DIR = BASE_DIR / "web"
 SPA_ROUTES = {"login", "chat", "report", "game", "knowledge", "leaderboard", "profile"}
-API_PREFIXES = {"health", "auth", "chat", "ai", "report", "scenarios", "users", "leaderboard", "knowledge"}
+API_PREFIXES = {"health", "auth", "chat", "ai", "report", "reports", "scenarios", "users", "leaderboard", "knowledge"}
 ADMIN_TOKEN = os.getenv("ANTI_FRAUD_ADMIN_TOKEN", "change-me")
 JWT_SECRET = os.getenv("JWT_SECRET", "anti-fraud-lab-secret-key-change-in-production-2024")
 
@@ -72,6 +74,7 @@ ALLOWED_ORIGINS = (
 
 # ── Rate Limiting (in-memory, no external deps) ──
 RATE_LIMIT_RPM = int(os.getenv("RATE_LIMIT_RPM", "0"))  # 0 = disabled
+REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "1").lower() not in {"0", "false", "no"}
 
 knowledge_base = KnowledgeBase(BASE_DIR / "data" / "knowledge_base.json")
 intent_recognizer = IntentRecognizer()
@@ -190,13 +193,57 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "anti-fraud-dialogue"}
 
 
+def _resolve_user(
+    requested_user_id: int,
+    authorization: str | None,
+) -> dict[str, object] | None:
+    if not authorization:
+        if REQUIRE_AUTH:
+            raise HTTPException(status_code=401, detail="请先登录后再使用该功能")
+        return None
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="未提供有效令牌")
+
+    user = auth_service.get_current_user(authorization.removeprefix("Bearer "))
+    if not user:
+        raise HTTPException(status_code=401, detail="令牌无效或已过期")
+    if int(user["id"]) != requested_user_id:
+        raise HTTPException(status_code=403, detail="不能访问或修改其他用户的数据")
+    return user
+
+
 @app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest) -> ChatResponse:
+def chat(
+    request: ChatRequest,
+    authorization: str | None = Header(default=None),
+) -> ChatResponse:
+    user = _resolve_user(request.user_id, authorization)
+    if user:
+        request = request.model_copy(
+            update={
+                "user_profile": request.user_profile.model_copy(update={"role": user["role"]}),
+            }
+        )
     return ChatResponse.model_validate(dialogue_service.process_chat(request))
 
 
+@app.post("/chat/reset")
+def reset_chat(
+    request: ChatResetRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, str]:
+    _resolve_user(request.user_id, authorization)
+    dialogue_service.reset_conversation(request.user_id)
+    return {"message": "对话状态已重置"}
+
+
 @app.post("/report", response_model=ReportResponse)
-def report(request: ReportRequest) -> ReportResponse:
+def report(
+    request: ReportRequest,
+    authorization: str | None = Header(default=None),
+) -> ReportResponse:
+    _resolve_user(request.user_id, authorization)
     result = report_service.analyze(
         user_id=request.user_id,
         url=request.url,
@@ -237,7 +284,11 @@ def list_scenarios() -> list[ScenarioSummary]:
 
 
 @app.post("/scenarios/start", response_model=ScenarioStartResponse)
-def start_scenario(request: ScenarioStartRequest) -> ScenarioStartResponse:
+def start_scenario(
+    request: ScenarioStartRequest,
+    authorization: str | None = Header(default=None),
+) -> ScenarioStartResponse:
+    _resolve_user(request.user_id, authorization)
     try:
         data = scenario_service.start(user_id=request.user_id, scenario_id=request.scenario_id)
     except ValueError as exc:
@@ -246,7 +297,11 @@ def start_scenario(request: ScenarioStartRequest) -> ScenarioStartResponse:
 
 
 @app.post("/scenarios/answer", response_model=ScenarioAnswerResponse)
-def answer_scenario(request: ScenarioAnswerRequest) -> ScenarioAnswerResponse:
+def answer_scenario(
+    request: ScenarioAnswerRequest,
+    authorization: str | None = Header(default=None),
+) -> ScenarioAnswerResponse:
+    _resolve_user(request.user_id, authorization)
     try:
         data = scenario_service.answer(user_id=request.user_id, option_index=request.option_index)
     except ValueError as exc:
@@ -255,7 +310,11 @@ def answer_scenario(request: ScenarioAnswerRequest) -> ScenarioAnswerResponse:
 
 
 @app.get("/users/{user_id}/progress", response_model=UserProgressResponse)
-def get_progress(user_id: int) -> UserProgressResponse:
+def get_progress(
+    user_id: int,
+    authorization: str | None = Header(default=None),
+) -> UserProgressResponse:
+    _resolve_user(user_id, authorization)
     data = gamification_service.profile(user_id)
     return UserProgressResponse.model_validate(data)
 
@@ -278,7 +337,9 @@ def get_user_reports(
     limit: int = Query(default=20, ge=1, le=100),
     start_at: datetime | None = Query(default=None),
     end_at: datetime | None = Query(default=None),
+    authorization: str | None = Header(default=None),
 ) -> ReportHistoryResponse:
+    _resolve_user(user_id, authorization)
     normalized_start_at = _to_storage_datetime(start_at)
     normalized_end_at = _to_storage_datetime(end_at)
 
@@ -298,6 +359,19 @@ def get_user_reports(
             "items": items,
         }
     )
+
+
+@app.patch("/reports/{report_id}/status")
+def update_report_status(
+    report_id: str,
+    update: ReportStatusUpdate,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, str]:
+    if x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="管理员令牌错误")
+    if not storage.update_report_status(report_id, update.status):
+        raise HTTPException(status_code=404, detail="举报记录不存在")
+    return {"report_id": report_id, "status": update.status}
 
 
 # ── 认证路由 ──
