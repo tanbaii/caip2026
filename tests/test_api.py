@@ -1660,7 +1660,7 @@ def test_p0_rule_matches_expose_version_and_rationale() -> None:
     assert response.status_code == 200
     data = response.json()
     assert data["ruleset_versions"]["text"] == "2.1.0"
-    assert data["ruleset_versions"]["url"] == "2.1.0"
+    assert data["ruleset_versions"]["url"] == "2.2.0"
     configured_rules = [item for item in data["matched_rules"] if item["rule"] == "scholarship_fraud"]
     assert configured_rules
     assert configured_rules[0]["rule_version"]

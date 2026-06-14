@@ -249,11 +249,24 @@ python scripts/benchmark_api.py \
 pytest -q
 ```
 
-当前仓库实测结果：**97 个通过，0 个失败**
+当前仓库实测结果：**99 个通过，0 个失败**
+
+### 7.1 规则离线评测
+
+仓库内置文本与 URL 风险规则回归集，覆盖刷单返利、游戏交易、冒充公检法、虚假投资、校园贷、助学金、机票退改签、否定语义、白名单边界和域名仿冒。评测会输出准确率、精确率、召回率、F1、误报率、规则断言通过率和 P95 延迟：
+
+```bash
+python scripts/evaluate_rules.py \
+  --iterations 100 \
+  --output RULE_EVALUATION.md \
+  --fail-on-regression
+```
+
+评测数据位于 `evaluation/risk_cases.json`。新增骗局或调整规则时，应同时增加风险正例和安全反例，避免只提高召回而放大误报。
 
 ### 规则与知识库版本
 
-- 文本规则集与 URL 规则集当前版本均为 `2.1.0`，接口通过 `ruleset_versions` 返回实际加载版本。
+- 文本规则集当前版本为 `2.1.0`，URL 规则集为 `2.2.0`；接口通过 `ruleset_versions` 返回实际加载版本。
 - 每条命中规则返回 `rule_version`、`ruleset_version` 和 `rationale`，前端可展开查看判定依据。
 - 知识库新增助学金/奖学金、机票退改签条目；闯关新增 `C010` 机票退改签场景。
 - 否定语义只在同一分句和有限窗口内生效，例如“没有要求转账”“不要提供验证码”不会被当作风险行为。
@@ -288,8 +301,12 @@ anti_fraud_system/
     main.py
   scripts/
     benchmark_api.py
+    evaluate_rules.py
+  evaluation/
+    risk_cases.json
   tests/
     test_api.py
+    test_rule_evaluation.py
   requirements.txt
   README.md
   USAGE_GUIDE.md

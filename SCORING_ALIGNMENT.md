@@ -31,7 +31,7 @@
 | 维度 | 内容 |
 |------|------|
 | **对应功能** | ① JSON 配置驱动的风险规则引擎（14 条文本规则 + 10 类 URL 结构检查 + 品牌仿冒检测）；② 轻量级意图识别器 |
-| **规则配置** | 每条规则含名称、触发词、权重、原因、版本和依据；规则集版本 `2.1.0`。支持同分句否定语义、域名边界白名单、子域名伪装、相似字符与相邻字符交换检测 |
+| **规则配置** | 每条规则含名称、触发词、权重、原因、版本和依据；文本规则集 `2.1.0`，URL 规则集 `2.2.0`。支持同分句否定语义、域名边界白名单、子域名伪装、相似字符与相邻字符交换检测 |
 | **演示入口** | `/chat` 和 `/report` 返回 `matched_rules`、`risk_breakdown`、`ruleset_versions`；前端可展开查看规则版本与判定依据 |
 | **相关文件** | `app/data/risk_rules.json`、`app/data/url_rules.json`、`app/services/risk_engine.py`、`app/services/intent_recognizer.py` |
 | **可验证证据** | `test_p0_negated_risk_actions_do_not_score_or_set_facts`：否定语义抑制误报；`test_p0_whitelist_uses_domain_boundary`：白名单无后缀绕过；`test_p0_domain_impersonation_and_typosquatting`：域名仿冒检测；`test_p0_rule_matches_expose_version_and_rationale`：版本与依据可见 |
@@ -105,7 +105,7 @@
 
 | 维度 | 说明 |
 |------|------|
-| **测试覆盖** | 97 个自动化测试（`pytest -q`），覆盖：API、规则引擎、聊天与举报否定语义、域名白名单边界、域名仿冒、知识库、认证、举报、游戏化、多轮对话与脱敏 |
+| **测试覆盖** | 99 个自动化测试（`pytest -q`），覆盖：API、规则引擎、聊天与举报否定语义、域名白名单边界、域名仿冒、离线指标评测、知识库、认证、举报、游戏化、多轮对话与脱敏 |
 | **测试隔离** | 每个测试使用独立临时数据库（`conftest.py`），测试间零状态污染 |
 | **代码规范** | Pydantic v2 Schema 校验所有入参和出参；类型注解全覆盖；模块化服务架构（RiskEngine、DialogueService、ReportService 独立可测） |
 | **配置管理** | 风险规则 JSON 配置化；数据库路径、JWT 密钥、管理员令牌、CORS 来源、限流参数均通过环境变量配置 |

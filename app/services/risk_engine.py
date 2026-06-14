@@ -38,7 +38,7 @@ _DEFAULT_TEXT_RULES = [
 
 _DEFAULT_RISK_RULES = {
     "_meta": {
-        "version": "2.1.0",
+        "version": "2.2.0",
         "updated": "2026-06-14",
         "rationale": "内置回退规则，依据反电信网络诈骗法与常见高发诈骗案例整理",
     },
@@ -103,7 +103,7 @@ _DEFAULT_URL_RULES = {
         {"name": "risky_tld", "condition": "risky_tld", "weight": 12, "flag": "\u57df\u540d\u540e\u7f00\u547d\u4e2d\u9ad8\u98ce\u9669\u96c6\u5408"},
         {"name": "plain_http", "condition": "plain_http", "weight": 10, "flag": "\u672a\u4f7f\u7528HTTPS\u52a0\u5bc6"},
         {"name": "subdomain_disguise", "condition": "subdomain_disguise", "weight": 20, "flag": "\u68c0\u6d4b\u5230\u5b50\u57df\u540d\u4f2a\u88c5"},
-        {"name": "typosquatting", "condition": "typosquatting", "weight": 18, "flag": "\u68c0\u6d4b\u5230\u6253\u5b57\u62a2\u6ce8\u578b\u57df\u540d"},
+        {"name": "typosquatting", "version": "2.2", "condition": "typosquatting", "weight": 20, "flag": "\u68c0\u6d4b\u5230\u6253\u5b57\u62a2\u6ce8\u578b\u57df\u540d", "rationale": "\u6253\u5b57\u62a2\u6ce8\u662f\u660e\u786e\u7684\u54c1\u724c\u4eff\u5192\u7279\u5f81\uff0c\u5355\u72ec\u547d\u4e2d\u5e94\u8fbe\u5230\u4e2d\u98ce\u9669\u544a\u8b66\u9608\u503c"},
         {"name": "keyword_impersonation", "condition": "keyword_impersonation", "weight": 15, "flag": "\u57df\u540d\u5305\u542b\u5b89\u5168\u3001\u8ba4\u8bc1\u3001\u5b98\u7f51\u7b49\u8bf1\u5bfc\u6027\u5173\u952e\u8bcd\u7ec4\u5408"},
     ],
     "score_levels": {"critical": 70, "high": 40, "medium": 20, "low": 0},
