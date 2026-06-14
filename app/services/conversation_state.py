@@ -1,6 +1,6 @@
 """Lightweight multi-turn conversation state for anti-fraud dialogue.
 
-In-memory only — no database persistence.  Each user_id maintains
+In-memory only -- no database persistence.  Each user_id maintains
 a ConversationState that tracks extracted facts, session stage,
 and pending follow-up questions across turns.
 """
@@ -11,7 +11,9 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-# ── Fact extraction patterns ──
+from app.services.text_semantics import find_effective_terms
+
+# -- Fact extraction patterns --
 
 _FACT_PATTERNS: dict[str, list[str]] = {
     "has_transfer_request": [
@@ -21,7 +23,7 @@ _FACT_PATTERNS: dict[str, list[str]] = {
     "has_verification_code_request": [
         "验证码", "短信码", "动态码", "校验码", "安全码",
     ],
-    "has_url": [],  # detected by URL regex separately
+    "has_url": [],
     "has_remote_control": [
         "屏幕共享", "远程控制", "下载会议", "下载软件", "共享屏幕", "向日葵", "teamviewer",
     ],
@@ -47,13 +49,21 @@ _FACT_PATTERNS: dict[str, list[str]] = {
         "ai换脸", "视频通话借钱", "克隆声音", "deepfake", "数字人", "ai语音",
         "换脸", "声音变了", "视频借钱",
     ],
+    "mentions_scholarship": [
+        "奖学金", "助学金", "教育资助", "学费返还", "助学贷款", "贫困补助",
+        "学校补助", "资助中心", "学信档案", "认证费",
+    ],
+    "mentions_flight": [
+        "航班取消", "机票改签", "延误理赔", "退票赔偿", "航司客服",
+        "改签链接", "延误险", "行程变动", "机票退款",
+    ],
+    "mentions_negation_semantics": [
+        "不是诈骗", "不是骗子", "不骗人", "正规平台", "你放心", "绝对安全", "不会骗你",
+    ],
 }
 
 _URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
 
-# ── Follow-up question templates ──
-
-# Key: (fact still missing, context)  Value: question text
 _FOLLOW_UPS: list[tuple[set[str], str]] = [
     ({"has_transfer_request"}, "对方是否要求你先交手续费、认证费或保证金？"),
     ({"has_verification_code_request"}, "是否让你填写银行卡、验证码或点击陌生链接？"),
@@ -64,12 +74,12 @@ _FOLLOW_UPS: list[tuple[set[str], str]] = [
     ({"has_secrecy_pressure"}, "对方是否要求你保密，不告诉家人或朋友？"),
     ({"has_time_pressure"}, "对方是否在催促你限时操作？"),
     ({"already_paid"}, "你是否已经向对方转过钱了？"),
+    ({"mentions_scholarship"}, "这个奖学金或助学金通知是通过学校官方渠道发送的吗？"),
+    ({"mentions_flight"}, "你是否已通过航空公司官方客服核实过航班状态？"),
+    ({"mentions_negation_semantics"}, "对方是否在主动强调'不是诈骗'或'绝对安全'？"),
 ]
 
-# ── Risk escalation rules based on multi-turn facts ──
-
 _ESCALATION_RULES: list[tuple[set[str], int, str, str]] = [
-    # (required_facts, bonus_score, rule_name, reason)
     ({"has_transfer_request", "has_verification_code_request"}, 20, "conv_transfer_and_code", "多轮对话确认：对方既要求转账又索要验证码，高度可疑"),
     ({"mentions_authority", "has_transfer_request"}, 25, "conv_authority_transfer", "多轮对话确认：冒充公检法并要求转账，极高危"),
     ({"has_url", "has_verification_code_request"}, 18, "conv_url_and_code", "多轮对话确认：发送链接并索要验证码，疑似钓鱼"),
@@ -79,13 +89,18 @@ _ESCALATION_RULES: list[tuple[set[str], int, str, str]] = [
     ({"mentions_reward_or_subsidy", "has_transfer_request"}, 16, "conv_reward_transfer", "多轮对话确认：以奖金/补贴为由要求缴费"),
     ({"mentions_reward_or_subsidy", "has_verification_code_request"}, 18, "conv_reward_code", "多轮对话确认：以奖金/补贴为由索要验证码"),
     ({"has_remote_control", "has_transfer_request"}, 20, "conv_remote_transfer", "多轮对话确认：要求屏幕共享+转账，极高危"),
+    ({"mentions_scholarship", "has_transfer_request"}, 20, "conv_scholarship_transfer", "多轮对话确认：冒充校方以奖学金/助学金为由收费"),
+    ({"mentions_scholarship", "has_verification_code_request"}, 22, "conv_scholarship_code", "多轮对话确认：以奖学金/助学金为由索要银行卡和验证码"),
+    ({"mentions_flight", "has_transfer_request"}, 18, "conv_flight_transfer", "多轮对话确认：冒充航司以改签/理赔为由诱导转账"),
+    ({"mentions_flight", "has_verification_code_request"}, 20, "conv_flight_code", "多轮对话确认：以航班改签为由索要验证码"),
+    ({"mentions_negation_semantics", "has_transfer_request"}, 14, "conv_negation_transfer", "多轮对话确认：对方主动声称非诈骗+要求转账"),
+    ({"mentions_negation_semantics", "has_verification_code_request"}, 16, "conv_negation_code", "多轮对话确认：对方强调安全+索要验证码"),
 ]
 
 
 @dataclass
 class ConversationState:
     """Per-user conversation state."""
-
     session_stage: str = "collecting"
     suspected_scam_type: str = ""
     known_facts: dict[str, bool] = field(default_factory=dict)
@@ -108,7 +123,6 @@ class ConversationState:
 
 class ConversationStateManager:
     """Manages in-memory conversation states for all users."""
-
     def __init__(self) -> None:
         self._states: dict[int, ConversationState] = {}
 
@@ -120,63 +134,36 @@ class ConversationStateManager:
     def reset(self, user_id: int) -> None:
         self._states.pop(user_id, None)
 
-    def update_and_get(
-        self,
-        user_id: int,
-        message: str,
-        risk_level: str,
-        intent: str,
-        matched_scams: list[dict[str, Any]],
-    ) -> dict[str, Any]:
-        """Update state after a turn, return state as dict."""
+    def update_and_get(self, user_id, message, risk_level, intent, matched_scams):
         state = self.get_state(user_id)
         current_scam_type = _top_scam_type(matched_scams)
         if _is_new_scam_topic(state, current_scam_type):
             state = ConversationState()
             self._states[user_id] = state
-
         state.turn_count += 1
         state.last_risk_level = risk_level
         state.last_intent = intent
-
-        # Extract facts from this message
         _extract_facts(message, state.known_facts)
-
-        # Update suspected scam type from matched scams
         if current_scam_type and not state.suspected_scam_type:
             state.suspected_scam_type = current_scam_type
-
-        # Determine stage
         state.session_stage = _determine_stage(state, risk_level)
-
-        # Compute follow-up questions
         state.pending_questions = _compute_follow_ups(state)
-
         return state.as_dict()
 
-    def recompute_stage(self, user_id: int, risk_level: str) -> dict[str, Any]:
-        """Re-evaluate stage and pending_questions after final risk_level is known.
-
-        Call this after compute_conversation_bonus has potentially changed the
-        risk level, so that session_stage and pending_questions are consistent
-        with the final risk score.
-        """
+    def recompute_stage(self, user_id, risk_level):
         state = self.get_state(user_id)
         state.last_risk_level = risk_level
         state.session_stage = _determine_stage(state, risk_level)
         state.pending_questions = _compute_follow_ups(state)
         return state.as_dict()
 
-    def compute_conversation_bonus(self, user_id: int) -> tuple[int, list[dict[str, Any]], list[str]]:
-        """Return (bonus_score, extra_matched_rules, extra_reasons) from multi-turn facts."""
+    def compute_conversation_bonus(self, user_id):
         state = self.get_state(user_id)
         if state.turn_count <= 1:
             return 0, [], []
-
         bonus = 0
-        extra_rules: list[dict[str, Any]] = []
-        extra_reasons: list[str] = []
-
+        extra_rules = []
+        extra_reasons = []
         for required_facts, score, rule_name, reason in _ESCALATION_RULES:
             if required_facts.issubset(k for k, v in state.known_facts.items() if v):
                 bonus += score
@@ -185,83 +172,67 @@ class ConversationStateManager:
                     "evidence": sorted(required_facts),
                     "weight": score,
                     "reason": reason,
+                    "rule_version": "1.0",
+                    "ruleset_version": "conversation-1.0",
+                    "rationale": "基于跨轮已确认事实组合进行风险升级",
                 })
                 extra_reasons.append(reason)
-
         return bonus, extra_rules, extra_reasons
 
 
-def _extract_facts(message: str, known_facts: dict[str, bool]) -> None:
-    """Extract facts from a message and merge into known_facts."""
+def _extract_facts(message, known_facts):
     text = message.lower()
-
     for fact_key, triggers in _FACT_PATTERNS.items():
         if known_facts.get(fact_key):
-            continue  # already known
-        if any(t in text for t in triggers):
+            continue
+        hits = find_effective_terms(
+            text,
+            triggers,
+            negation_exempt=fact_key == "mentions_negation_semantics",
+        )
+        if hits:
             known_facts[fact_key] = True
-
-    # URL detection
     if not known_facts.get("has_url") and _URL_RE.search(message):
         known_facts["has_url"] = True
 
 
-def _top_scam_type(matched_scams: list[dict[str, Any]]) -> str:
+def _top_scam_type(matched_scams):
     if not matched_scams:
         return ""
     return str(matched_scams[0].get("type") or "")
 
 
-def _is_new_scam_topic(state: ConversationState, current_scam_type: str) -> bool:
-    return bool(
-        current_scam_type
-        and state.suspected_scam_type
-        and current_scam_type != state.suspected_scam_type
-    )
+def _is_new_scam_topic(state, current_scam_type):
+    return bool(current_scam_type and state.suspected_scam_type and current_scam_type != state.suspected_scam_type)
 
 
-def _determine_stage(state: ConversationState, risk_level: str) -> str:
-    """Determine session stage based on accumulated facts and risk level."""
+def _determine_stage(state, risk_level):
     facts = state.known_facts
-
-    # If already paid or critical risk -> warning (stop questioning, focus on rescue)
     if facts.get("already_paid") or risk_level == "critical":
         return "warning"
-
-    # High risk with enough facts -> warning
     if risk_level == "high" and state.turn_count >= 2:
         return "warning"
-
-    # High risk from first turn or many risk signals -> warning
     if risk_level == "high":
         signal_count = sum(1 for v in facts.values() if v)
         if signal_count >= 3:
             return "warning"
         return "assessing"
-
-    # Medium risk or multiple turns with some facts -> assessing
     if risk_level == "medium" or state.turn_count >= 2:
         return "assessing"
-
     return "collecting"
 
 
-def _compute_follow_ups(state: ConversationState) -> list[str]:
-    """Generate up to 2 follow-up questions based on missing facts."""
+def _compute_follow_ups(state):
     if state.session_stage == "warning":
-        return []  # no more questions — time to act
-
-    questions: list[str] = []
-    seen: set[str] = set()
-
+        return []
+    questions = []
+    seen = set()
     for required_missing, question in _FOLLOW_UPS:
         if len(questions) >= 2:
             break
         if question in seen:
             continue
-        # Ask if ANY of the required facts are still unknown
         if any(not state.known_facts.get(f) for f in required_missing):
             questions.append(question)
             seen.add(question)
-
     return questions

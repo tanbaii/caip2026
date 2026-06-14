@@ -703,12 +703,11 @@ def test_url_score_to_level_uses_url_config() -> None:
     from app.services.risk_engine import RiskEngine
 
     engine = RiskEngine()
-    # Punycode (20) + @ (20) + risky TLD (12) + HTTP (10) = 62
+    # Punycode (20) + @ (20) + risky TLD (12) + HTTP (10) + keyword_impersonation (15) = 77
     result = engine.evaluate_url("http://xn--secure-bank-5k9f.top/login@notice")
-    assert result["score"] == 62
-    assert result["level"] == "high"
-    # 如果错误地使用 risk_rules 的 critical=70，high=40，结果相同
-    # 但通过 _url_score_to_level 方法存在性验证实现正确性
+    assert result["score"] == 77
+    assert result["level"] == "critical"
+    # 通过 _url_score_to_level 方法存在性验证实现正确性
     assert hasattr(engine, "_url_score_to_level")
 
 
@@ -1538,3 +1537,139 @@ def test_new_password_hash_uses_random_salt() -> None:
     assert stored_first.startswith("pbkdf2_sha256$")
     assert stored_second.startswith("pbkdf2_sha256$")
     assert stored_first != stored_second
+
+
+def test_p0_knowledge_covers_scholarship_and_airline_refund() -> None:
+    scams = client.get("/knowledge/scams").json()
+    by_type = {item["type"]: item for item in scams}
+
+    for scam_type in ("scholarship_fraud", "airline_ticket_refund"):
+        assert scam_type in by_type
+        entry = by_type[scam_type]
+        for field in ("keywords", "tactics", "red_flags", "typical_case", "prevention", "legal_refs"):
+            assert entry[field], f"{scam_type} missing {field}"
+
+
+def test_p0_scholarship_and_airline_rules_reach_high_risk() -> None:
+    from app.services.risk_engine import RiskEngine
+
+    engine = RiskEngine()
+    scholarship = engine.evaluate_text(
+        "学校助学金补录要先交认证费，还让我提供验证码",
+        [{"name": "助学金/奖学金诈骗"}],
+        "student",
+        None,
+    )
+    airline = engine.evaluate_text(
+        "航班取消，航司客服发改签链接让我先付补差价并提供验证码",
+        [{"name": "机票退改签诈骗"}],
+        "general",
+        None,
+    )
+
+    assert scholarship["level"] in {"high", "critical"}
+    assert airline["level"] in {"high", "critical"}
+    assert "scholarship_fraud" in {item["rule"] for item in scholarship["matched_rules"]}
+    assert "airline_ticket_refund" in {item["rule"] for item in airline["matched_rules"]}
+
+
+def test_p0_negated_risk_actions_do_not_score_or_set_facts() -> None:
+    from app.services.risk_engine import RiskEngine
+
+    engine = RiskEngine()
+    result = engine.evaluate_text(
+        "公检法不会要求转账到安全账户，也不要向任何人提供验证码",
+        [],
+        "general",
+        None,
+    )
+    assert result["score"] == 0
+    assert not {"authority_pressure", "account_takeover", "transfer_critical"}.intersection(
+        item["rule"] for item in result["matched_rules"]
+    )
+
+    chat = client.post("/chat", json={
+        "user_id": 9801,
+        "message": "对方没有要求我转账，也没有向我要验证码",
+    })
+    assert chat.status_code == 200
+    facts = chat.json()["known_facts"]
+    assert facts.get("has_transfer_request") is not True
+    assert facts.get("has_verification_code_request") is not True
+
+
+def test_p0_report_negation_avoids_keyword_false_positive() -> None:
+    response = client.post("/report", json={
+        "user_id": 9803,
+        "content": "官方提醒：不要提供验证码，也不需要缴纳保证金或认证费",
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["verdict"] == "safe"
+    assert data["risk_breakdown"]["content_score"] == 0
+    assert data["matched_keywords"] == []
+
+
+def test_p0_trust_reassurance_remains_suspicious() -> None:
+    from app.services.risk_engine import RiskEngine
+
+    result = RiskEngine().evaluate_text(
+        "对方一直强调这不是诈骗，是正规平台，绝对安全",
+        [],
+        "general",
+        None,
+    )
+    assert "trust_reassurance" in {item["rule"] for item in result["matched_rules"]}
+
+
+def test_p0_whitelist_uses_domain_boundary() -> None:
+    from app.services.risk_engine import RiskEngine
+
+    engine = RiskEngine()
+    official = engine.evaluate_url("https://service.edu.cn/notice")
+    suffix_attack = engine.evaluate_url("http://evilgov.cn/login")
+    userinfo_attack = engine.evaluate_url("https://gov.cn@evil.com/login")
+
+    assert official["score"] == 0
+    assert official["matched_rules"][0]["rule"] == "domain_whitelist"
+    assert suffix_attack["score"] > 0
+    assert all(item["rule"] != "domain_whitelist" for item in suffix_attack["matched_rules"])
+    assert all(item["rule"] != "domain_whitelist" for item in userinfo_attack["matched_rules"])
+
+
+def test_p0_domain_impersonation_and_typosquatting() -> None:
+    from app.services.risk_engine import RiskEngine
+
+    engine = RiskEngine()
+    official = engine.evaluate_url("https://www.taobao.com/order")
+    subdomain_attack = engine.evaluate_url("https://taobao.com.evil.top/login")
+    typo_attack = engine.evaluate_url("https://aircnina.com/refund")
+
+    assert official["score"] == 0
+    assert subdomain_attack["score"] >= 20
+    assert "subdomain_disguise" in {item["rule"] for item in subdomain_attack["matched_rules"]}
+    assert "typosquatting" in {item["rule"] for item in typo_attack["matched_rules"]}
+
+
+def test_p0_rule_matches_expose_version_and_rationale() -> None:
+    response = client.post("/chat", json={
+        "user_id": 9802,
+        "message": "助学金补录要求先交认证费并提供验证码",
+        "user_profile": {"role": "student"},
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ruleset_versions"]["text"] == "2.1.0"
+    assert data["ruleset_versions"]["url"] == "2.1.0"
+    configured_rules = [item for item in data["matched_rules"] if item["rule"] == "scholarship_fraud"]
+    assert configured_rules
+    assert configured_rules[0]["rule_version"]
+    assert configured_rules[0]["ruleset_version"] == "2.1.0"
+    assert configured_rules[0]["rationale"]
+
+
+def test_p0_airline_scenario_is_available() -> None:
+    scenarios = client.get("/scenarios").json()
+    airline = next((item for item in scenarios if item["id"] == "C010"), None)
+    assert airline is not None
+    assert airline["scam_type"] == "airline_ticket_refund"

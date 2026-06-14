@@ -311,5 +311,6 @@ class ChatWorkflowRunner:
                 "conversation_summary": _build_conversation_summary(conv_data),
                 "turn_count": conv_data["turn_count"],
                 "retrieved_knowledge": state["retrieved_knowledge"],
+                "ruleset_versions": self.service.risk_engine.ruleset_versions,
             }
         }

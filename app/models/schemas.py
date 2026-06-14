@@ -41,6 +41,7 @@ class ChatResponse(BaseModel):
     conversation_summary: str = ""
     turn_count: int = 0
     retrieved_knowledge: list[dict[str, Any]] = Field(default_factory=list)
+    ruleset_versions: dict[str, str] = Field(default_factory=dict)
 
 
 class ChatResetRequest(BaseModel):
@@ -72,6 +73,7 @@ class ReportResponse(BaseModel):
     risk_breakdown: dict[str, Any] = Field(default_factory=dict)
     next_actions: list[str] = Field(default_factory=list)
     status: Literal["pending", "reviewed", "closed"] = "pending"
+    ruleset_versions: dict[str, str] = Field(default_factory=dict)
 
 
 class ReportHistoryItem(BaseModel):

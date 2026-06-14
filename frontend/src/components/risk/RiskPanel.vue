@@ -81,6 +81,8 @@
               <StatusBadge v-for="badge in risk.badges" :key="badge" tone="info">{{ badge }}</StatusBadge>
               <StatusBadge v-if="!risk.badges.length" tone="muted">暂无新勋章</StatusBadge>
               <StatusBadge tone="muted">{{ risk.latencyMs.toFixed(1) }} ms</StatusBadge>
+              <StatusBadge v-if="risk.rulesetVersions.text" tone="muted">文本规则 v{{ risk.rulesetVersions.text }}</StatusBadge>
+              <StatusBadge v-if="risk.rulesetVersions.url" tone="muted">URL 规则 v{{ risk.rulesetVersions.url }}</StatusBadge>
             </div>
           </section>
         </div>

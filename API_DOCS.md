@@ -175,6 +175,9 @@
 | total_points | int | 总积分 |
 | badges | list[str] | 勋章列表 |
 | latency_ms | float | 处理延迟 (ms) |
+| matched_rules | list[object] | 命中规则，含证据、权重、规则版本、规则集版本与判定依据 |
+| risk_breakdown | object | 文本、URL、知识库、画像、情绪、多轮对话等分数拆解 |
+| ruleset_versions | object | 实际加载的文本规则集与 URL 规则集版本 |
 
 ---
 
@@ -251,6 +254,9 @@
 | recommendations | list[str] | 建议 |
 | matched_keywords | list[str] | 命中关键词 |
 | url_flags | list[str] | URL 风险标记 |
+| matched_rules | list[object] | 命中规则及 `rule_version`、`ruleset_version`、`rationale` |
+| risk_breakdown | object | URL 分、文本分和总分 |
+| ruleset_versions | object | 实际加载的文本规则集与 URL 规则集版本 |
 
 判定阈值:
 - `score >= 55` → `high_risk`

@@ -1,55 +1,82 @@
 {
+  "_meta": {
+    "version": "2.1.0",
+    "updated": "2026-06-14",
+    "changelog": {
+      "2.1.0": "否定语义从可疑话术识别扩展为同分句风险词抑制，并在命中结果中返回规则版本与依据",
+      "2.0.0": "新增助学金诈骗、机票退改签诈骗规则；新增否定语义检测、域名仿冒特征；规则增加版本号与解释依据",
+      "1.0.0": "初始版本"
+    },
+    "rationale": "规则依据《反电信网络诈骗法》、公安部反诈中心2024-2025年度高发诈骗类型通报、国家反诈中心APP典型案例库"
+  },
   "text_rules": [
     {
       "name": "transfer_before_service",
+      "version": "1.0",
       "triggers": ["先转", "垫付", "保证金", "手续费", "解冻"],
       "weight": 18,
-      "reason": "出现放款或服务前收费特征"
+      "reason": "出现放款或服务前收费特征",
+      "rationale": "公安部反诈中心发布的'先交费后放款'十类高危话术"
     },
     {
       "name": "high_return",
+      "version": "1.0",
       "triggers": ["稳赚", "高收益", "内幕消息", "带单"],
       "weight": 15,
-      "reason": "出现保本高收益话术"
+      "reason": "出现保本高收益话术",
+      "rationale": "《防范和处置非法集资条例》第十条，禁止承诺保本保收益"
     },
     {
       "name": "authority_pressure",
+      "version": "1.0",
       "triggers": ["公检法", "安全账户", "涉嫌", "保密办案"],
       "weight": 20,
-      "reason": "出现冒充机关施压特征"
+      "reason": "出现冒充机关施压特征",
+      "rationale": "公安机关办案流程规范，公检法不会通过电话要求转账或设立'安全账户'"
     },
     {
       "name": "account_takeover",
+      "version": "1.0",
       "triggers": ["验证码", "远程控制", "屏幕共享", "账号密码"],
       "weight": 22,
-      "reason": "存在账户接管风险"
+      "reason": "存在账户接管风险",
+      "rationale": "银行账户安全管理规范，验证码、屏幕共享为账户接管核心手段"
     },
     {
       "name": "off_platform_trade",
+      "version": "1.0",
       "triggers": ["私下交易", "绕开平台", "线下转账"],
       "weight": 14,
-      "reason": "交易绕开担保平台"
+      "reason": "交易绕开担保平台",
+      "rationale": "电子商务法要求平台经营者提供交易安全保障"
     },
     {
       "name": "fake_refund_or_compensation",
+      "version": "1.0",
       "triggers": ["退款", "理赔", "双倍赔付", "订单异常", "客服来电"],
       "weight": 16,
-      "reason": "命中冒充客服退款/理赔诈骗特征"
+      "reason": "命中冒充客服退款/理赔诈骗特征",
+      "rationale": "消费者权益保护法，退款应通过平台官方渠道处理"
     },
     {
       "name": "acquaintance_impersonation",
+      "version": "1.0",
       "triggers": ["急借", "别告诉别人", "同学借钱", "熟人借钱"],
       "weight": 14,
-      "reason": "命中冒充熟人借钱施压特征"
+      "reason": "命中冒充熟人借钱施压特征",
+      "rationale": "国家反诈中心统计，社交账号盗用冒充熟人为十大高发诈骗之一"
     },
     {
       "name": "campus_loan",
+      "version": "1.0",
       "triggers": ["校园贷", "征信修复", "刷流水", "学生专享"],
       "weight": 16,
-      "reason": "命中校园金融诈骗风险特征"
+      "reason": "命中校园金融诈骗风险特征",
+      "rationale": "教育部等五部门《关于进一步规范大学生互联网消费贷款监督管理工作的通知》"
     },
     {
       "name": "ai_deepfake",
+      "version": "1.1",
       "triggers": [
         "AI换脸", "ai换脸", "深度伪造", "deepfake",
         "AI语音", "ai语音", "克隆声音", "合成声音",
@@ -58,38 +85,107 @@
         "face swap", "voice clone"
       ],
       "weight": 22,
-      "reason": "命中 AI 深度伪造诈骗特征（换脸/语音克隆/数字人）"
+      "reason": "命中 AI 深度伪造诈骗特征（换脸/语音克隆/数字人）",
+      "rationale": "国家互联网信息办公室《人工智能生成内容管理暂行办法》，AI伪造身份诈骗为2024-2025年增长最快的新型犯罪手法"
     },
     {
       "name": "ai_investment_scam",
+      "version": "1.0",
       "triggers": [
         "AI选股", "AI量化", "AI内幕", "智能投顾",
         "算法交易", "AI预测", "AI荐股", "量化内幕",
         "AI操盘手", "机器人理财"
       ],
       "weight": 17,
-      "reason": "命中 AI 虚假投资/量化骗局特征"
+      "reason": "命中 AI 虚假投资/量化骗局特征",
+      "rationale": "证监会关于非法证券投资咨询的认定标准，AI概念包装的荐股实为无资质经营"
+    },
+    {
+      "name": "scholarship_fraud",
+      "version": "2.0",
+      "triggers": [
+        "助学金", "奖学金补录", "认证费", "教育资助",
+        "学费返还", "助学贷款注销", "学信档案",
+        "学校补助", "贫困补助"
+      ],
+      "weight": 18,
+      "reason": "命中奖学金/助学金诈骗特征（冒充校方/教育局收费）",
+      "rationale": "教育部学生资助管理中心声明：国家助学贷款和奖学金发放不收取任何费用"
+    },
+    {
+      "name": "airline_ticket_refund",
+      "version": "2.0",
+      "triggers": [
+        "航班取消", "机票改签", "延误理赔", "退票赔偿",
+        "航司客服", "补差价", "改签链接", "延误险",
+        "行程变动"
+      ],
+      "weight": 17,
+      "reason": "命中机票退改签诈骗特征（冒充航司诱导转账）",
+      "rationale": "民航局提醒：航班变动应通过航司官方渠道核实，不点击短信外链"
+    },
+    {
+      "name": "trust_reassurance",
+      "version": "2.1",
+      "triggers": [
+        "不是诈骗", "不是骗子", "不骗人", "正规平台",
+        "有备案", "你放心", "绝对安全", "不会骗你"
+      ],
+      "weight": 8,
+      "reason": "出现主动消除戒心的话术（如声称不是诈骗、绝对安全）",
+      "rationale": "诈骗心理学研究：主动声称'不是诈骗'是预判式消除受害者疑虑的常见话术策略"
+    },
+    {
+      "name": "domain_impersonation_text",
+      "version": "2.0",
+      "triggers": [
+        "官网链接", "登录链接", "认证链接", "安全链接",
+        "仿冒页面", "钓鱼网站"
+      ],
+      "weight": 12,
+      "reason": "文本出现引导访问链接的关键词，需结合URL检测",
+      "rationale": "域名仿冒是钓鱼攻击的核心手段，需与URL检测联动判断"
     }
   ],
+  "semantic_negation": {
+    "version": "1.0",
+    "window": 12,
+    "prefixes": [
+      "没有", "并未", "未曾", "未", "没让", "没要", "没",
+      "不需要", "无需", "不会", "不应", "不能", "不要", "拒绝",
+      "禁止", "避免", "no ", "not ", "never "
+    ],
+    "contrast_markers": ["但是", "不过", "然而", "而是", "但"],
+    "exempt_rules": ["trust_reassurance"],
+    "rationale": "否定词仅在同一分句和有限字符窗口内抑制风险词；转折后的风险行为重新独立判断，避免安全提醒造成误报"
+  },
   "transfer_critical": {
+    "version": "1.1",
     "pattern": "(准备转账|已经转账|马上转|立刻转)",
     "weight": 20,
-    "reason": "用户可能正处于转账关键节点"
+    "reason": "用户可能正处于转账关键节点",
+    "rationale": "已准备或完成转账意味着风险从信息接触升级到资金损失阶段"
   },
   "scam_match_bonus": {
+    "version": "1.1",
     "base": 6,
     "cap": 20,
-    "reason": "文本与已知诈骗模型高度相关"
+    "reason": "文本与已知诈骗模型高度相关",
+    "rationale": "知识库命中用于补充规则关键词无法覆盖的场景语义"
   },
   "student_campus": {
-    "keywords": ["校园", "学费", "奖学金", "兼职"],
+    "version": "1.1",
+    "keywords": ["校园", "学费", "奖学金", "助学金", "兼职", "补助"],
     "weight": 10,
-    "reason": "学生群体相关场景，建议提高警惕"
+    "reason": "学生群体相关场景，建议提高警惕",
+    "rationale": "赛题目标用户包含学生群体，校园金融与资助场景需提高敏感度"
   },
   "emotion_bonus": {
+    "version": "1.1",
     "emotions": ["anxious", "negative"],
     "weight": 5,
-    "reason": "情绪信号提示可能受压或焦虑"
+    "reason": "情绪信号提示可能受压或焦虑",
+    "rationale": "焦虑和负面情绪常与催促、恐吓等社会工程施压同时出现"
   },
   "score_levels": {
     "critical": 70,

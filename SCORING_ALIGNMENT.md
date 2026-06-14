@@ -18,23 +18,23 @@
 
 | 维度 | 内容 |
 |------|------|
-| **对应功能** | 结构化反诈知识库，含 9 类骗局（刷单返利、游戏交易、冒充公检法、虚假投资、校园贷、冒充客服退款、冒充熟人、快递理赔、AI深度伪造）和 5 部法律法规 |
+| **对应功能** | 结构化反诈知识库，含 11 类骗局（覆盖刷单返利、游戏交易、冒充公检法、虚假投资、校园贷、助学金/奖学金、机票退改签、AI深度伪造等）和 5 部法律法规 |
 | **数据结构** | JSON Schema 化：每条骗局含 `id`、`type`、`name`、`keywords`、`tactics`、`red_flags`、`typical_case`、`prevention`、`legal_refs` |
 | **演示入口** | `GET /knowledge/scams` → 返回全部骗局条目；`GET /knowledge/laws` → 返回法律要点 |
 | **前端入口** | `/knowledge` 知识库页面，支持关键词搜索过滤 |
 | **相关文件** | `app/data/knowledge_base.json`、`app/services/knowledge_base.py`、`frontend/src/pages/KnowledgePage.vue` |
-| **可验证证据** | `test_knowledge_base_is_enriched`：验证 ≥8 条骗局、≥5 条法律；`test_knowledge_base_includes_ai_deepfake_scam`：验证 AI 深度伪造条目存在 |
+| **可验证证据** | `test_knowledge_base_is_enriched`：验证知识与法律数量；`test_p0_knowledge_covers_scholarship_and_airline_refund`：验证助学金、机票退改签条目及完整字段 |
 | **扩展能力** | `POST /knowledge/scams`（管理员）可动态新增骗局知识；风险规则修改后需重启服务或重新创建规则引擎实例 |
 
 ### 1.2 规则引擎与意图识别（5 分）
 
 | 维度 | 内容 |
 |------|------|
-| **对应功能** | ① JSON 配置驱动的风险规则引擎（`risk_rules.json`，10 条文本规则 + URL 规则）；② 轻量级意图识别器（5 类意图：知识查询、求助、举报、闯关、AI诈骗识别） |
-| **规则配置** | 每条规则含 `name`、`triggers`（关键词列表）、`weight`（权重）、`reason`（原因）；URL 规则含 `shortener_domains`、`risky_tlds`、7 类结构检查 |
-| **演示入口** | `/chat` 接口返回 `matched_rules`（命中规则详情）、`risk_breakdown`（分数拆解） |
+| **对应功能** | ① JSON 配置驱动的风险规则引擎（14 条文本规则 + 10 类 URL 结构检查 + 品牌仿冒检测）；② 轻量级意图识别器 |
+| **规则配置** | 每条规则含名称、触发词、权重、原因、版本和依据；规则集版本 `2.1.0`。支持同分句否定语义、域名边界白名单、子域名伪装、相似字符与相邻字符交换检测 |
+| **演示入口** | `/chat` 和 `/report` 返回 `matched_rules`、`risk_breakdown`、`ruleset_versions`；前端可展开查看规则版本与判定依据 |
 | **相关文件** | `app/data/risk_rules.json`、`app/data/url_rules.json`、`app/services/risk_engine.py`、`app/services/intent_recognizer.py` |
-| **可验证证据** | `test_risk_rules_loaded_from_json_config`：规则从 JSON 加载；`test_json_config_drives_scoring`：修改权重后评分变化；`test_text_authority_pressure_still_high_risk`：公检法+验证码→高风险；`test_intent_recognizer_detects_ai_fraud`：AI 诈骗意图识别 |
+| **可验证证据** | `test_p0_negated_risk_actions_do_not_score_or_set_facts`：否定语义抑制误报；`test_p0_whitelist_uses_domain_boundary`：白名单无后缀绕过；`test_p0_domain_impersonation_and_typosquatting`：域名仿冒检测；`test_p0_rule_matches_expose_version_and_rationale`：版本与依据可见 |
 | **配置化证据** | 新增骗局规则只需编辑 JSON，无需改 Python 代码 |
 
 ### 1.3 风险劝阻与举报功能（5 分）
@@ -55,7 +55,7 @@
 
 | 维度 | 内容 |
 |------|------|
-| **情景闯关** | 9 个剧本化情景推理关卡（C001-C009），含案件背景、角色扮演、线索收集、目标引导、案件复盘和反诈知识点；其中 C008（AI换脸借钱）和 C009（奖学金冒充通知）为完整剧本杀式推理模式 |
+| **情景闯关** | 10 个剧本化情景关卡（C001-C010）；C008 为 AI 换脸推理、C009 为奖学金冒充通知、C010 为机票退改签诈骗 |
 | **积分体系** | 聊天研判、举报提交、闯关完成均可获得积分；关卡采用“首次通关奖励 + 最佳成绩增量”结算，相同成绩不可重复刷分 |
 | **勋章系统** | 达成条件自动授予勋章，展示在排行榜和个人主页 |
 | **成长记录** | 持久化每关挑战次数、最佳分、完成时间和累计奖励；关卡卡片、结算页与个人主页形成完整反馈闭环 |
@@ -63,7 +63,7 @@
 | **泛终端适配** | Vue 3 + Tailwind CSS 4 响应式布局，适配桌面端和移动端；FastAPI 后端 RESTful API 适配网页/小程序/移动端接入 |
 | **演示入口** | `/game` 闯关页、`/leaderboard` 排行榜、`/profile` 个人主页 |
 | **相关文件** | `app/services/scenario_service.py`、`app/data/scenarios.json`、`app/services/gamification.py`、`frontend/src/pages/GamePage.vue`、`frontend/src/pages/LeaderboardPage.vue` |
-| **可验证证据** | `test_scenario_flow`：闯关流程完整；`test_scenarios_return_at_least_9`：9 个关卡；`test_scenario_replay_cannot_farm_same_score`：相同成绩不可刷分；`test_scenario_replay_rewards_only_best_score_improvement`：复玩仅奖励最佳成绩增量；`test_leaderboard_returns_data`：排行榜有数据 |
+| **可验证证据** | `test_scenario_flow`：闯关流程完整；`test_p0_airline_scenario_is_available`：C010 机票退改签场景存在；`test_scenario_replay_cannot_farm_same_score`：相同成绩不可刷分；`test_scenario_replay_rewards_only_best_score_improvement`：复玩仅奖励最佳成绩增量 |
 
 ---
 
@@ -71,11 +71,11 @@
 
 | 创新点 | 说明 |
 |--------|------|
-| **剧本杀式反诈推理训练** | C008/C009 采用完整剧本杀模式：案件背景→角色扮演→线索卡片→分步推理→案件复盘→反诈知识点，用户不是简单答题，而是在剧情中收集线索、识别诈骗话术、做出处置决策 |
+| **剧本杀式反诈推理训练** | C008/C009 采用完整剧本杀模式，C010 补充高频出行诈骗实战；用户在剧情中收集线索、识别话术并做出处置决策 |
 | **JSON 配置驱动规则引擎** | 风险规则、URL 规则均从 JSON 文件加载；内置默认规则兜底，配置缺失不崩溃；当前规则在服务启动时加载 |
 | **AI 深度伪造诈骗识别** | 新增 AI 换脸、语音克隆、数字人等 18 个触发词，覆盖 2025-2026 年新型 AI 诈骗手法 |
-| **全链路可解释输出** | 每次研判返回命中规则详情（规则名、证据、权重、原因）、风险分拆解（文本/URL/知识库/用户画像/情绪/多轮对话维度）、建议下一步动作，无黑盒 LLM 参与风险判定 |
-| **状态机式多轮反诈对话** | 基于内存状态机的多轮追问系统：自动从用户消息中抽取 11 类事实（转账、验证码、URL、远程控制、保密施压、限时催促、已转账、公检法、投资、奖金补贴、AI 伪造），按 collecting→assessing→warning→debriefing 四阶段推进，已知事实跨轮累积，组合事实触发风险升级（如转账+验证码→高危、公检法+已转账→极高危），warning 阶段自动停止追问并输出止损动作 |
+| **全链路可解释输出** | 每次研判返回规则名、证据、权重、原因、规则版本、规则集版本和依据，并提供多维风险分拆解与下一步动作 |
+| **状态机式多轮反诈对话** | 多轮状态机抽取 14 类事实，新增助学金、航班退改签和主动消除戒心话术；事实抽取同样支持否定语义，避免“没有要求转账”污染跨轮状态 |
 | **情绪感知研判** | 支持传入用户情绪状态（anxious/negative/positive/neutral），情绪信号影响风险评分 |
 | **学生群体适配** | 用户角色区分 student/general，学生场景（校园/学费/奖学金/兼职）触发额外风险加分，高危时追加辅导员联系建议 |
 | **知识库快速接入** | 管理员通过 `POST /knowledge/scams` 动态新增骗局类型，系统自动纳入后续研判 |
@@ -89,8 +89,8 @@
 
 | 维度 | 说明 |
 |------|------|
-| **真实场景覆盖** | 覆盖刷单返利、冒充公检法、虚假投资、校园贷、冒充客服退款、冒充熟人、快递理赔、游戏交易、AI 深度伪造 9 类高频骗局 |
-| **URL 风险检测** | 7 类 URL 结构检查：协议缺失、IP 直连、@ 符号跳转伪装、punycode 域名、短链域名、高风险后缀、HTTP 明文 |
+| **真实场景覆盖** | 覆盖刷单返利、冒充公检法、虚假投资、校园贷、助学金/奖学金、机票退改签、冒充客服、AI 深度伪造等 11 类高频骗局 |
+| **URL 风险检测** | 10 类 URL 结构检查，并增加品牌域名仿冒、白名单边界、IDN/Punycode 规范化与相邻字符交换检测 |
 | **关键词黑名单** | 举报服务内置 20+ 诈骗关键词，覆盖传统话术和新型 AI 诈骗术语 |
 | **一键举报** | `/report` 接口支持 URL + 文本同时提交，返回判定结果、风险分、命中关键词、处置建议 |
 | **历史记录** | `/users/{id}/reports` 查询举报历史，管理员可更新待复核/已复核/已关闭状态；仅保存 URL 主机、脱敏内容摘要与原因，不保存完整敏感内容 |
@@ -105,14 +105,14 @@
 
 | 维度 | 说明 |
 |------|------|
-| **测试覆盖** | 88 个自动化测试（`pytest -q`），覆盖：API 端点、风险引擎、URL 检测、知识库、认证与越权防护、举报复核、排行榜、防刷分游戏化、意图识别、JSON 配置加载、可解释输出、敏感信息脱敏、多轮对话与重置 |
+| **测试覆盖** | 97 个自动化测试（`pytest -q`），覆盖：API、规则引擎、聊天与举报否定语义、域名白名单边界、域名仿冒、知识库、认证、举报、游戏化、多轮对话与脱敏 |
 | **测试隔离** | 每个测试使用独立临时数据库（`conftest.py`），测试间零状态污染 |
 | **代码规范** | Pydantic v2 Schema 校验所有入参和出参；类型注解全覆盖；模块化服务架构（RiskEngine、DialogueService、ReportService 独立可测） |
 | **配置管理** | 风险规则 JSON 配置化；数据库路径、JWT 密钥、管理员令牌、CORS 来源、限流参数均通过环境变量配置 |
 | **错误降级** | 配置文件缺失时回退内置默认规则；Ollama 未运行时返回降级提示；API 返回统一错误格式 |
 | **文档完整** | README（部署指南 + 烟雾测试）、SECURITY_DESIGN.md（安全设计）、USAGE_GUIDE.md（交互手册）、SCORING_ALIGNMENT.md（评分映射）、DEMO_SCRIPT.md（答辩脚本） |
-| **前端构建** | `npm run build` 通过，Vite 生产构建，CSS 7.96 KB + JS 56.15 KB（gzip） |
-| **可验证证据** | `pytest -q` → 88 passed；`npm run build` → 生产构建通过 |
+| **前端构建** | `npm run build` 通过，Vite 生产构建，CSS 8.48 KB + JS 60.70 KB（gzip） |
+| **可验证证据** | `pytest -q` → 97 passed；`npm run build` → 生产构建通过 |
 
 ---
 
@@ -147,7 +147,7 @@
 
 ```bash
 # 后端测试
-pytest -q                           # 88 passed
+pytest -q                           # 97 passed
 
 # 前端构建
 cd frontend && npm run build        # built in ~30s

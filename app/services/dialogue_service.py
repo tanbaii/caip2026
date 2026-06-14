@@ -187,6 +187,7 @@ class DialogueService:
             "conversation_summary": _build_conversation_summary(conv_data),
             "turn_count": conv_data["turn_count"],
             "retrieved_knowledge": retrieved_knowledge,
+            "ruleset_versions": self.risk_engine.ruleset_versions,
         }
 
     def _retrieve_knowledge(self, message: str) -> list[dict[str, Any]]:
