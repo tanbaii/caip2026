@@ -111,6 +111,35 @@ class ScamEntryCreate(BaseModel):
     legal_refs: list[str] = Field(min_length=1)
 
 
+class RuleUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    weight: int | None = Field(default=None, ge=0, le=100)
+    change_note: str = Field(min_length=2, max_length=200)
+
+
+class TextRuleCreateRequest(BaseModel):
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]{2,63}$")
+    triggers: list[str] = Field(min_length=1, max_length=50)
+    weight: int = Field(ge=0, le=100)
+    reason: str = Field(min_length=2, max_length=120)
+    rationale: str = Field(min_length=2, max_length=300)
+    version: str = Field(default="1.0", min_length=1, max_length=24)
+    enabled: bool = True
+    change_note: str = Field(min_length=2, max_length=200)
+
+    @model_validator(mode="after")
+    def normalize_triggers(self) -> "TextRuleCreateRequest":
+        cleaned = list(dict.fromkeys(item.strip() for item in self.triggers if item.strip()))
+        if not cleaned:
+            raise ValueError("至少需要一个有效触发词")
+        self.triggers = cleaned
+        return self
+
+
+class RuleRollbackRequest(BaseModel):
+    change_note: str = Field(min_length=2, max_length=200)
+
+
 class ScenarioSummary(BaseModel):
     id: str
     title: str

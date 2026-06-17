@@ -508,12 +508,12 @@ def test_json_config_drives_scoring() -> None:
 
     from app.services.risk_engine import RiskEngine
 
-    # 读取原配置，把 authority_pressure 权重改为 999
+    # 读取原配置，把 authority_pressure 权重改为合法范围内的 99
     original = Path("app/data/risk_rules.json")
     cfg = json.loads(original.read_text(encoding="utf-8"))
     for rule in cfg["text_rules"]:
         if rule["name"] == "authority_pressure":
-            rule["weight"] = 999
+            rule["weight"] = 99
             break
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as f:
@@ -523,7 +523,7 @@ def test_json_config_drives_scoring() -> None:
     try:
         engine = RiskEngine(risk_rules_path=tmp_path)
         result = engine.evaluate_text("涉及公检法调查", [], "general", None)
-        assert result["score"] >= 999
+        assert result["score"] >= 99
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
@@ -1673,3 +1673,106 @@ def test_p0_airline_scenario_is_available() -> None:
     airline = next((item for item in scenarios if item["id"] == "C010"), None)
     assert airline is not None
     assert airline["scam_type"] == "airline_ticket_refund"
+
+
+def test_rule_admin_requires_token_and_lists_versions() -> None:
+    from app.main import ADMIN_TOKEN
+
+    denied = client.get("/admin/rules/overview")
+    assert denied.status_code == 401
+
+    response = client.get(
+        "/admin/rules/overview",
+        headers={"x-admin-token": ADMIN_TOKEN},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["active_revision"]["id"] >= 1
+    assert data["ruleset_versions"]["text"]
+    assert data["ruleset_versions"]["url"]
+    assert any(rule["name"] == "trust_reassurance" for rule in data["text_rules"])
+
+
+def test_rule_can_be_disabled_and_hot_reloaded_then_rolled_back() -> None:
+    from app.main import ADMIN_TOKEN, risk_engine
+
+    headers = {"x-admin-token": ADMIN_TOKEN}
+    original = client.get("/admin/rules/overview", headers=headers).json()
+    original_revision = original["active_revision"]["id"]
+    message = "对方强调这不是诈骗，是正规平台，绝对安全"
+
+    before = risk_engine.evaluate_text(message, [], "general", None)
+    assert "trust_reassurance" in {item["rule"] for item in before["matched_rules"]}
+
+    try:
+        disabled = client.patch(
+            "/admin/rules/text/trust_reassurance",
+            headers=headers,
+            json={"enabled": False, "change_note": "自动化测试停用规则"},
+        )
+        assert disabled.status_code == 200
+        assert disabled.json()["ruleset_versions"]["text"] != original["ruleset_versions"]["text"]
+
+        after = risk_engine.evaluate_text(message, [], "general", None)
+        assert "trust_reassurance" not in {item["rule"] for item in after["matched_rules"]}
+
+        history = client.get("/admin/rules/history", headers=headers).json()
+        assert history[0]["action"] == "update"
+        assert "停用" in history[0]["change_summary"]
+    finally:
+        restored = client.post(
+            f"/admin/rules/rollback/{original_revision}",
+            headers=headers,
+            json={"change_note": "自动化测试恢复原规则"},
+        )
+        assert restored.status_code == 200
+
+    recovered = risk_engine.evaluate_text(message, [], "general", None)
+    assert "trust_reassurance" in {item["rule"] for item in recovered["matched_rules"]}
+
+
+def test_new_scam_rule_takes_effect_without_restart_and_can_rollback() -> None:
+    from app.main import ADMIN_TOKEN, risk_engine, storage
+    from app.services.risk_engine import RiskEngine
+    from app.services.rule_management import RuleManagementService
+
+    headers = {"x-admin-token": ADMIN_TOKEN}
+    original = client.get("/admin/rules/overview", headers=headers).json()
+    original_revision = original["active_revision"]["id"]
+    message = "快递破损领取专属补偿码"
+    rule_name = f"fake_delivery_{uuid.uuid4().hex[:8]}"
+
+    try:
+        created = client.post(
+            "/admin/rules/text",
+            headers=headers,
+            json={
+                "name": rule_name,
+                "triggers": ["专属补偿码", "快递破损"],
+                "weight": 24,
+                "reason": "命中快递理赔诱导",
+                "rationale": "自动化测试新增骗局规则",
+                "version": "1.0",
+                "enabled": True,
+                "change_note": "测试新增骗局无需重启",
+            },
+        )
+        assert created.status_code == 200
+        result = risk_engine.evaluate_text(message, [], "general", None)
+        assert rule_name in {item["rule"] for item in result["matched_rules"]}
+        assert result["level"] == "medium"
+
+        reloaded_engine = RiskEngine()
+        RuleManagementService(reloaded_engine, storage)
+        persisted = reloaded_engine.evaluate_text(message, [], "general", None)
+        assert rule_name in {item["rule"] for item in persisted["matched_rules"]}
+    finally:
+        restored = client.post(
+            f"/admin/rules/rollback/{original_revision}",
+            headers=headers,
+            json={"change_note": "自动化测试移除临时规则"},
+        )
+        assert restored.status_code == 200
+
+    result = risk_engine.evaluate_text(message, [], "general", None)
+    assert rule_name not in {item["rule"] for item in result["matched_rules"]}

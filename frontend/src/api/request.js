@@ -60,7 +60,7 @@ export async function request(path, options = {}) {
   const body = await parseResponse(response)
 
   if (!response.ok) {
-    if (response.status === 401) {
+    if (response.status === 401 && !options.preserveAuth) {
       clearAuthStorage()
     }
 
@@ -84,6 +84,14 @@ export function post(path, body, options = {}) {
   return request(path, {
     ...options,
     method: 'POST',
+    body: JSON.stringify(body || {}),
+  })
+}
+
+export function patch(path, body, options = {}) {
+  return request(path, {
+    ...options,
+    method: 'PATCH',
     body: JSON.stringify(body || {}),
   })
 }

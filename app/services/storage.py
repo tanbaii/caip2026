@@ -78,11 +78,108 @@ class SQLiteStorage:
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS rule_versions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    action TEXT NOT NULL,
+                    change_summary TEXT NOT NULL,
+                    text_version TEXT NOT NULL,
+                    url_version TEXT NOT NULL,
+                    risk_config_json TEXT NOT NULL,
+                    url_config_json TEXT NOT NULL,
+                    source_version_id INTEGER,
+                    is_active INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
             self._ensure_column(conn, "reports", "url_host", "TEXT")
             self._ensure_column(conn, "reports", "content_summary", "TEXT")
             self._ensure_column(conn, "reports", "reasons_json", "TEXT NOT NULL DEFAULT '[]'")
             self._ensure_column(conn, "reports", "status", "TEXT NOT NULL DEFAULT 'pending'")
             conn.commit()
+
+    def create_rule_version(
+        self,
+        *,
+        action: str,
+        change_summary: str,
+        text_version: str,
+        url_version: str,
+        risk_config: dict[str, Any],
+        url_config: dict[str, Any],
+        source_version_id: int | None = None,
+    ) -> dict[str, Any]:
+        with self._connect() as conn:
+            conn.execute("UPDATE rule_versions SET is_active = 0 WHERE is_active = 1")
+            cursor = conn.execute(
+                """
+                INSERT INTO rule_versions (
+                    action, change_summary, text_version, url_version,
+                    risk_config_json, url_config_json, source_version_id, is_active
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                """,
+                (
+                    action,
+                    change_summary,
+                    text_version,
+                    url_version,
+                    json.dumps(risk_config, ensure_ascii=False),
+                    json.dumps(url_config, ensure_ascii=False),
+                    source_version_id,
+                ),
+            )
+            version_id = int(cursor.lastrowid)
+            conn.commit()
+        version = self.get_rule_version(version_id)
+        if version is None:
+            raise RuntimeError("规则版本写入失败")
+        return version
+
+    def get_active_rule_version(self) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM rule_versions WHERE is_active = 1 ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+        return self._rule_version_row(row) if row else None
+
+    def get_rule_version(self, version_id: int) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM rule_versions WHERE id = ?",
+                (version_id,),
+            ).fetchone()
+        return self._rule_version_row(row) if row else None
+
+    def list_rule_versions(self, limit: int = 30) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM rule_versions ORDER BY id DESC LIMIT ?",
+                (max(1, min(int(limit), 100)),),
+            ).fetchall()
+        return [self._rule_version_row(row, include_configs=False) for row in rows]
+
+    @staticmethod
+    def _rule_version_row(
+        row: sqlite3.Row,
+        *,
+        include_configs: bool = True,
+    ) -> dict[str, Any]:
+        result = {
+            "id": int(row["id"]),
+            "action": str(row["action"]),
+            "change_summary": str(row["change_summary"]),
+            "text_version": str(row["text_version"]),
+            "url_version": str(row["url_version"]),
+            "source_version_id": row["source_version_id"],
+            "is_active": bool(row["is_active"]),
+            "created_at": str(row["created_at"]),
+        }
+        if include_configs:
+            result["risk_config"] = json.loads(row["risk_config_json"])
+            result["url_config"] = json.loads(row["url_config_json"])
+        return result
 
     def record_scenario_completion(
         self,

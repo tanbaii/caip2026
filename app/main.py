@@ -23,13 +23,16 @@ from app.models.schemas import (
     ReportRequest,
     ReportResponse,
     ReportHistoryResponse,
-    ScamEntryCreate,
     ReportStatusUpdate,
+    RuleRollbackRequest,
+    RuleUpdateRequest,
+    ScamEntryCreate,
     ScenarioAnswerRequest,
     ScenarioAnswerResponse,
     ScenarioStartRequest,
     ScenarioStartResponse,
     ScenarioSummary,
+    TextRuleCreateRequest,
     UserInfoResponse,
     UserProgressResponse,
 )
@@ -44,6 +47,7 @@ from app.services.knowledge_retriever import KnowledgeRetriever
 from app.services.report_service import ReportService
 from app.services.rag_reply_service import RagReplyGenerator
 from app.services.risk_engine import RiskEngine
+from app.services.rule_management import RuleManagementService
 from app.services.scenario_service import ScenarioService
 from app.services.storage import SQLiteStorage
 
@@ -53,8 +57,8 @@ load_dotenv(PROJECT_ROOT / ".env")
 FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
 FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
 LEGACY_WEB_DIR = BASE_DIR / "web"
-SPA_ROUTES = {"login", "chat", "report", "game", "knowledge", "leaderboard", "profile"}
-API_PREFIXES = {"health", "auth", "chat", "ai", "report", "reports", "scenarios", "users", "leaderboard", "knowledge"}
+SPA_ROUTES = {"login", "chat", "report", "game", "knowledge", "leaderboard", "profile", "admin"}
+API_PREFIXES = {"health", "auth", "chat", "ai", "report", "reports", "scenarios", "users", "leaderboard", "knowledge", "admin"}
 ADMIN_TOKEN = os.getenv("ANTI_FRAUD_ADMIN_TOKEN", "change-me")
 JWT_SECRET = os.getenv("JWT_SECRET", "anti-fraud-lab-secret-key-change-in-production-2024")
 
@@ -81,6 +85,7 @@ intent_recognizer = IntentRecognizer()
 risk_engine = RiskEngine()
 _db_path = os.getenv("DB_PATH") or str(BASE_DIR / "data" / "anti_fraud.db")
 storage = SQLiteStorage(Path(_db_path))
+rule_management_service = RuleManagementService(risk_engine=risk_engine, storage=storage)
 gamification_service = GamificationService(storage=storage)
 auth_service = AuthService(storage=storage, secret_key=JWT_SECRET)
 report_service = ReportService(
@@ -184,6 +189,7 @@ def home() -> FileResponse:
 @app.get("/game", include_in_schema=False)
 @app.get("/knowledge", include_in_schema=False)
 @app.get("/profile", include_in_schema=False)
+@app.get("/admin/rules", include_in_schema=False)
 def vue_page() -> FileResponse:
     return FileResponse(_frontend_index_file())
 
@@ -211,6 +217,11 @@ def _resolve_user(
     if int(user["id"]) != requested_user_id:
         raise HTTPException(status_code=403, detail="不能访问或修改其他用户的数据")
     return user
+
+
+def _require_admin(x_admin_token: str | None) -> None:
+    if x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="管理员令牌错误")
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -267,8 +278,7 @@ def add_scam(
     entry: ScamEntryCreate,
     x_admin_token: str | None = Header(default=None),
 ) -> dict[str, str]:
-    if x_admin_token != ADMIN_TOKEN:
-        raise HTTPException(status_code=401, detail="管理员令牌错误")
+    _require_admin(x_admin_token)
 
     try:
         knowledge_base.add_scam(entry.model_dump())
@@ -367,11 +377,75 @@ def update_report_status(
     update: ReportStatusUpdate,
     x_admin_token: str | None = Header(default=None),
 ) -> dict[str, str]:
-    if x_admin_token != ADMIN_TOKEN:
-        raise HTTPException(status_code=401, detail="管理员令牌错误")
+    _require_admin(x_admin_token)
     if not storage.update_report_status(report_id, update.status):
         raise HTTPException(status_code=404, detail="举报记录不存在")
     return {"report_id": report_id, "status": update.status}
+
+
+# ── 规则管理与热加载 ──
+
+@app.get("/admin/rules/overview")
+def rule_overview(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_admin(x_admin_token)
+    return rule_management_service.overview()
+
+
+@app.get("/admin/rules/history")
+def rule_history(
+    limit: int = Query(default=30, ge=1, le=100),
+    x_admin_token: str | None = Header(default=None),
+) -> list[dict[str, object]]:
+    _require_admin(x_admin_token)
+    return rule_management_service.history(limit=limit)
+
+
+@app.patch("/admin/rules/{ruleset}/{rule_name}")
+def update_rule(
+    ruleset: str,
+    rule_name: str,
+    request: RuleUpdateRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_admin(x_admin_token)
+    try:
+        return rule_management_service.update_rule(
+            ruleset,
+            rule_name,
+            enabled=request.enabled,
+            weight=request.weight,
+            change_note=request.change_note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/admin/rules/text")
+def create_text_rule(
+    request: TextRuleCreateRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_admin(x_admin_token)
+    payload = request.model_dump(exclude={"change_note"})
+    try:
+        return rule_management_service.add_text_rule(payload, request.change_note)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/admin/rules/rollback/{version_id}")
+def rollback_rules(
+    version_id: int,
+    request: RuleRollbackRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_admin(x_admin_token)
+    try:
+        return rule_management_service.rollback(version_id, request.change_note)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 # ── 认证路由 ──

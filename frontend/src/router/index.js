@@ -7,6 +7,7 @@ import GamePage from '../pages/GamePage.vue'
 import KnowledgePage from '../pages/KnowledgePage.vue'
 import LeaderboardPage from '../pages/LeaderboardPage.vue'
 import ProfilePage from '../pages/ProfilePage.vue'
+import RuleAdminPage from '../pages/RuleAdminPage.vue'
 import { useAuth } from '../composables/useAuth.js'
 
 const router = createRouter({
@@ -25,6 +26,7 @@ const router = createRouter({
         { path: 'knowledge', component: KnowledgePage },
         { path: 'leaderboard', component: LeaderboardPage },
         { path: 'profile', component: ProfilePage },
+        { path: 'admin/rules', component: RuleAdminPage },
       ],
     },
   ],

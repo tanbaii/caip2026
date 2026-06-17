@@ -4,7 +4,10 @@ import json
 import ipaddress
 import logging
 import re
+from copy import deepcopy
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 from app.services.text_semantics import (
@@ -16,6 +19,18 @@ from app.services.text_semantics import (
 logger = logging.getLogger(__name__)
 
 _DATA_DIR = Path(__file__).resolve().parent.parent / "data"
+
+
+@dataclass(frozen=True)
+class _RuntimeConfig:
+    risk_cfg: dict[str, Any]
+    url_cfg: dict[str, Any]
+    rules: list[dict[str, Any]]
+    shortener_domains: set[str]
+    risky_tlds: set[str]
+    url_checks: list[dict[str, Any]]
+    risk_ruleset_version: str
+    url_ruleset_version: str
 
 # ---------- Built-in defaults (used when JSON config is absent or broken) ----------
 
@@ -134,15 +149,129 @@ class RiskEngine:
         risk_path = Path(risk_rules_path) if risk_rules_path else _DATA_DIR / "risk_rules.json"
         url_path = Path(url_rules_path) if url_rules_path else _DATA_DIR / "url_rules.json"
 
-        self._risk_cfg = _load_json(risk_path, _DEFAULT_RISK_RULES)
-        self._url_cfg = _load_json(url_path, _DEFAULT_URL_RULES)
+        self._runtime = self._build_runtime(
+            _load_json(risk_path, _DEFAULT_RISK_RULES),
+            _load_json(url_path, _DEFAULT_URL_RULES),
+        )
 
-        self.rules: list[dict] = self._risk_cfg.get("text_rules", _DEFAULT_TEXT_RULES)
-        self.shortener_domains: set[str] = set(self._url_cfg.get("shortener_domains", []))
-        self.risky_tlds: set[str] = set(self._url_cfg.get("risky_tlds", []))
-        self._url_checks: list[dict] = self._url_cfg.get("checks", [])
-        self.risk_ruleset_version = str(self._risk_cfg.get("_meta", {}).get("version", "unknown"))
-        self.url_ruleset_version = str(self._url_cfg.get("_meta", {}).get("version", "unknown"))
+    @property
+    def _risk_cfg(self) -> dict[str, Any]:
+        return self._runtime.risk_cfg
+
+    @property
+    def _url_cfg(self) -> dict[str, Any]:
+        return self._runtime.url_cfg
+
+    @property
+    def rules(self) -> list[dict[str, Any]]:
+        return self._runtime.rules
+
+    @property
+    def shortener_domains(self) -> set[str]:
+        return self._runtime.shortener_domains
+
+    @property
+    def risky_tlds(self) -> set[str]:
+        return self._runtime.risky_tlds
+
+    @property
+    def _url_checks(self) -> list[dict[str, Any]]:
+        return self._runtime.url_checks
+
+    @property
+    def risk_ruleset_version(self) -> str:
+        return self._runtime.risk_ruleset_version
+
+    @property
+    def url_ruleset_version(self) -> str:
+        return self._runtime.url_ruleset_version
+
+    @classmethod
+    def validate_configs(cls, risk_cfg: dict[str, Any], url_cfg: dict[str, Any]) -> None:
+        if not isinstance(risk_cfg.get("text_rules"), list) or not risk_cfg["text_rules"]:
+            raise ValueError("文本规则集不能为空")
+        if not isinstance(url_cfg.get("checks"), list) or not url_cfg["checks"]:
+            raise ValueError("URL 规则集不能为空")
+
+        cls._validate_rule_list(risk_cfg["text_rules"], "文本")
+        cls._validate_rule_list(url_cfg["checks"], "URL", require_triggers=False)
+
+        supported_conditions = {
+            "missing_protocol", "ip_direct", "at_symbol", "punycode",
+            "shortener_domain", "risky_tld", "plain_http",
+            "subdomain_disguise", "typosquatting", "keyword_impersonation",
+        }
+        for rule in url_cfg["checks"]:
+            if rule.get("condition") not in supported_conditions:
+                raise ValueError(f"URL 规则 {rule.get('name')} 使用了不支持的 condition")
+
+        pattern = str(risk_cfg.get("transfer_critical", {}).get("pattern", ""))
+        try:
+            re.compile(pattern)
+        except re.error as exc:
+            raise ValueError(f"转账关键节点正则无效: {exc}") from exc
+
+        for label, cfg in (("文本", risk_cfg), ("URL", url_cfg)):
+            levels = cfg.get("score_levels", {})
+            values = [levels.get(name) for name in ("low", "medium", "high", "critical")]
+            if not all(isinstance(value, int) for value in values) or values != sorted(values):
+                raise ValueError(f"{label}风险等级阈值必须按 low/medium/high/critical 递增")
+            if not str(cfg.get("_meta", {}).get("version", "")).strip():
+                raise ValueError(f"{label}规则集缺少版本号")
+
+    @staticmethod
+    def _validate_rule_list(
+        rules: list[dict[str, Any]],
+        label: str,
+        *,
+        require_triggers: bool = True,
+    ) -> None:
+        names: set[str] = set()
+        for rule in rules:
+            name = str(rule.get("name", "")).strip()
+            if not name:
+                raise ValueError(f"{label}规则缺少名称")
+            if name in names:
+                raise ValueError(f"{label}规则名称重复: {name}")
+            names.add(name)
+            if not isinstance(rule.get("enabled", True), bool):
+                raise ValueError(f"规则 {name} 的 enabled 必须是布尔值")
+            weight = rule.get("weight")
+            if not isinstance(weight, int) or not 0 <= weight <= 100:
+                raise ValueError(f"规则 {name} 的权重必须是 0 到 100 的整数")
+            if require_triggers:
+                triggers = rule.get("triggers")
+                if not isinstance(triggers, list) or not triggers or not all(
+                    isinstance(item, str) and item.strip() for item in triggers
+                ):
+                    raise ValueError(f"文本规则 {name} 至少需要一个有效触发词")
+
+    @classmethod
+    def _build_runtime(
+        cls,
+        risk_cfg: dict[str, Any],
+        url_cfg: dict[str, Any],
+    ) -> _RuntimeConfig:
+        risk_copy = deepcopy(risk_cfg)
+        url_copy = deepcopy(url_cfg)
+        cls.validate_configs(risk_copy, url_copy)
+        return _RuntimeConfig(
+            risk_cfg=risk_copy,
+            url_cfg=url_copy,
+            rules=risk_copy.get("text_rules", _DEFAULT_TEXT_RULES),
+            shortener_domains=set(url_copy.get("shortener_domains", [])),
+            risky_tlds=set(url_copy.get("risky_tlds", [])),
+            url_checks=url_copy.get("checks", []),
+            risk_ruleset_version=str(risk_copy.get("_meta", {}).get("version", "unknown")),
+            url_ruleset_version=str(url_copy.get("_meta", {}).get("version", "unknown")),
+        )
+
+    def apply_configs(self, risk_cfg: dict[str, Any], url_cfg: dict[str, Any]) -> None:
+        """Validate both rule sets, then atomically swap the runtime snapshot."""
+        self._runtime = self._build_runtime(risk_cfg, url_cfg)
+
+    def export_configs(self) -> tuple[dict[str, Any], dict[str, Any]]:
+        return deepcopy(self._risk_cfg), deepcopy(self._url_cfg)
 
     @property
     def ruleset_versions(self) -> dict[str, str]:
@@ -187,6 +316,8 @@ class RiskEngine:
         negation_cfg = cfg.get("semantic_negation", {})
         exempt_rules = set(negation_cfg.get("exempt_rules", []))
         for rule in self.rules:
+            if not rule.get("enabled", True):
+                continue
             hits = self.effective_terms(
                 text,
                 rule.get("triggers", []),
@@ -287,6 +418,8 @@ class RiskEngine:
             }
 
         for check in self._url_checks:
+            if not check.get("enabled", True):
+                continue
             cond = check["condition"]
             hit = False
             if cond == "missing_protocol":

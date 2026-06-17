@@ -30,8 +30,13 @@
 | 15 | GET | `/leaderboard` | `leaderboard()` :245 | app.js:481 | 无 |
 | 16 | POST | `/ai/chat` | `ai_chat()` :253 | app.js:379 | 无 |
 | 17 | GET | `/` | `home()` :87 | — (HTML 入口) | 无 |
+| 18 | GET | `/admin/rules/overview` | `rule_overview()` | 规则管理页 | x-admin-token |
+| 19 | GET | `/admin/rules/history` | `rule_history()` | 规则管理页 | x-admin-token |
+| 20 | PATCH | `/admin/rules/{ruleset}/{rule_name}` | `update_rule()` | 规则管理页 | x-admin-token |
+| 21 | POST | `/admin/rules/text` | `create_text_rule()` | 规则管理页 | x-admin-token |
+| 22 | POST | `/admin/rules/rollback/{version_id}` | `rollback_rules()` | 规则管理页 | x-admin-token |
 
-共 17 个端点 (9 GET / 8 POST)。
+共 22 个端点。
 
 ---
 
@@ -512,6 +517,53 @@ GET /users/1/reports?limit=10&start_at=2026-04-01T00:00:00&end_at=2026-05-01T00:
 
 ---
 
+## 规则管理接口
+
+### GET /admin/rules/overview — 当前规则
+
+返回当前生效修订、文本/URL 规则集版本，以及各规则的启停状态、权重、解释依据和触发词。请求头：`X-Admin-Token`。
+
+### PATCH /admin/rules/{ruleset}/{rule_name} — 在线启停或调权
+
+```json
+{
+  "enabled": false,
+  "weight": 10,
+  "change_note": "调整消除戒心规则"
+}
+```
+
+`enabled` 和 `weight` 至少提供一项。校验通过后立即热加载，无需重启。
+
+### POST /admin/rules/text — 新增文本骗局规则
+
+```json
+{
+  "name": "fake_delivery_compensation",
+  "triggers": ["快递破损", "专属补偿码"],
+  "weight": 24,
+  "reason": "命中快递理赔诱导",
+  "rationale": "冒充快递客服诱导领取赔偿的高发话术",
+  "version": "1.0",
+  "enabled": true,
+  "change_note": "接入快递理赔新骗局"
+}
+```
+
+### GET /admin/rules/history — 版本记录
+
+按时间倒序返回不可变修订记录，包括动作、变更说明、两套规则版本和当前生效标记。
+
+### POST /admin/rules/rollback/{version_id} — 回滚
+
+```json
+{"change_note": "回滚误发布规则"}
+```
+
+回滚不会删除后续历史，而是以目标快照创建一条新的生效修订，保留完整审计链。
+
+---
+
 ## 系统接口
 
 ### GET /health — 健康检查
@@ -566,6 +618,6 @@ GET /users/1/reports?limit=10&start_at=2026-04-01T00:00:00&end_at=2026-05-01T00:
 
 ### 前后端一致性
 
-前端调用的 15 个接口, 后端全部有对应实现。后端独有的接口:
-- `POST /knowledge/scams` — 管理员功能, 前端无入口
+前端调用接口均有对应后端实现。规则管理页面已覆盖概览、启停调权、新增规则、历史与回滚接口。后端独有的接口:
+- `POST /knowledge/scams` — 知识库管理员接口
 - `GET /` — HTML 入口, 浏览器直接访问

@@ -42,7 +42,7 @@
 <script setup>
 import { computed } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { BookOpen, Flag, Gamepad2, LogOut, Medal, MessageCircle, Shield, User } from 'lucide-vue-next'
+import { BookOpen, Flag, Gamepad2, LogOut, Medal, MessageCircle, Settings2, Shield, User } from 'lucide-vue-next'
 import { useAuth } from '../../composables/useAuth.js'
 
 const route = useRoute()
@@ -55,6 +55,7 @@ const navItems = [
   { icon: Gamepad2, label: '反诈闯关', path: '/game' },
   { icon: BookOpen, label: '知识库', path: '/knowledge' },
   { icon: Medal, label: '排行榜 / 等级', path: '/leaderboard' },
+  { icon: Settings2, label: '规则管理', path: '/admin/rules' },
 ]
 
 const displayName = computed(() => currentUser.value?.nickname || currentUser.value?.username || '未登录用户')

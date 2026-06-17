@@ -249,7 +249,7 @@ python scripts/benchmark_api.py \
 pytest -q
 ```
 
-当前仓库实测结果：**99 个通过，0 个失败**
+当前仓库实测结果：**102 个通过，0 个失败**
 
 ### 7.1 规则离线评测
 
@@ -263,6 +263,18 @@ python scripts/evaluate_rules.py \
 ```
 
 评测数据位于 `evaluation/risk_cases.json`。新增骗局或调整规则时，应同时增加风险正例和安全反例，避免只提高召回而放大误报。
+
+### 7.2 规则管理与热加载
+
+登录后访问 `/admin/rules` 可打开规则控制台。管理接口使用 `ANTI_FRAUD_ADMIN_TOKEN` 对应的 `X-Admin-Token` 鉴权，支持：
+
+- 查看当前文本规则集、URL 规则集版本及生效修订；
+- 在线启停规则、调整 0-100 权重；
+- 新增可配置文本骗局规则并立即进入聊天和举报研判链路；
+- 查看 SQLite 中的不可变变更记录，并将任意历史快照回滚为新的生效修订；
+- 发布前校验规则名称、触发词、权重、URL condition、正则和风险等级阈值。
+
+热加载采用完整运行时快照替换，同一服务进程中的现有 `DialogueService` 与 `ReportService` 无需重建。生产部署建议使用单进程应用实例，或在多实例环境中增加配置发布消息通知。
 
 ### 规则与知识库版本
 
@@ -294,6 +306,7 @@ anti_fraud_system/
       schemas.py
     services/
       *.py
+      rule_management.py
     web/
       index.html
       app.js
