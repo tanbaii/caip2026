@@ -241,7 +241,30 @@ python scripts/benchmark_api.py \
 
 ---
 
-## 7. 自动化测试现状
+## 7. 演示数据一键初始化
+
+为了保证答辩现场稳定复现，可用脚本生成固定演示用户、举报历史、闯关进度、积分勋章和规则变更审计记录：
+
+```bash
+python scripts/seed_demo_data.py --reset
+```
+
+默认写入 `DB_PATH` 指向的 SQLite，未设置时写入 `app/data/anti_fraud.db`。脚本输出会列出演示账号：
+
+| 用户名 | 密码 | 用途 |
+|--------|------|------|
+| `demo_student` | `Demo@123456` | 学生端完整演示：聊天、举报、闯关、积分、规则命中 |
+| `demo_guardian` | `Demo@123456` | 泛个人用户体验账号 |
+
+初始化后可访问：
+
+- `/profile`：查看积分、等级、勋章与闯关进度；
+- `/report`：查看举报记录与状态；
+- `/admin/rules`：查看“新增快递理赔规则、临时调权、回滚”的规则审计轨迹。
+
+---
+
+## 8. 自动化测试现状
 
 执行：
 
@@ -249,9 +272,9 @@ python scripts/benchmark_api.py \
 pytest -q
 ```
 
-当前仓库实测结果：**102 个通过，0 个失败**
+当前仓库实测结果：**103 个通过，0 个失败**
 
-### 7.1 规则离线评测
+### 8.1 规则离线评测
 
 仓库内置文本与 URL 风险规则回归集，覆盖刷单返利、游戏交易、冒充公检法、虚假投资、校园贷、助学金、机票退改签、否定语义、白名单边界和域名仿冒。评测会输出准确率、精确率、召回率、F1、误报率、规则断言通过率和 P95 延迟：
 
@@ -264,7 +287,7 @@ python scripts/evaluate_rules.py \
 
 评测数据位于 `evaluation/risk_cases.json`。新增骗局或调整规则时，应同时增加风险正例和安全反例，避免只提高召回而放大误报。
 
-### 7.2 规则管理与热加载
+### 8.2 规则管理与热加载
 
 登录后访问 `/admin/rules` 可打开规则控制台。管理接口使用 `ANTI_FRAUD_ADMIN_TOKEN` 对应的 `X-Admin-Token` 鉴权，支持：
 
@@ -293,7 +316,7 @@ python scripts/evaluate_rules.py \
 
 ---
 
-## 8. 目录结构
+## 9. 目录结构
 
 ```text
 anti_fraud_system/
@@ -315,6 +338,7 @@ anti_fraud_system/
   scripts/
     benchmark_api.py
     evaluate_rules.py
+    seed_demo_data.py
   evaluation/
     risk_cases.json
   tests/
@@ -327,17 +351,19 @@ anti_fraud_system/
 
 ---
 
-## 9. 故障排查
+## 10. 故障排查
 
 - 端口占用：`uvicorn` 启动失败时，改端口 `--port 8001`
 - 依赖安装慢：优先升级 pip，或换镜像源
 - 前端一直显示未登录：清理浏览器 `localStorage` 后重新登录
+- 管理规则提示 401：确认 `ANTI_FRAUD_ADMIN_TOKEN` 与页面输入一致，管理令牌只保存在浏览器会话
 - AI 回复报连接失败：先检查 `ollama serve` 是否在运行
 
 ---
 
-## 10. 安全提示
+## 11. 安全提示
 
 - 默认密钥仅用于开发演示，生产环境必须替换
 - 管理员 token 不要写死在前端
+- `scripts/seed_demo_data.py --reset` 只清理固定演示用户及其业务记录，不清理真实用户
 - 涉及真实资金风险场景时，优先执行止损与报警流程

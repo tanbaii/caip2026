@@ -31,12 +31,24 @@ docker compose ps
 curl http://localhost:8000/health
 ```
 
+可选：生成固定答辩演示数据。
+
+```bash
+docker compose exec api python scripts/seed_demo_data.py --reset
+```
+
+该命令会创建 `demo_student` / `demo_guardian` 两个演示账号、举报记录、闯关进度和规则管理审计记录。
+
 ## 常用环境变量
 
 可以在项目根目录 `.env` 中配置：
 
 ```env
 APP_PORT=8000
+JWT_SECRET=replace-with-random-secret
+ANTI_FRAUD_ADMIN_TOKEN=replace-with-admin-token
+CORS_ORIGINS=http://localhost:8000
+RATE_LIMIT_RPM=60
 
 POSTGRES_DB=anti_fraud_rag
 POSTGRES_USER=postgres
@@ -54,6 +66,8 @@ OLLAMA_MODEL=qwen3-lora
 MODELSCOPE_BGE_M3_MODEL_ID=BAAI/bge-m3
 BGE_M3_USE_FP16=0
 ```
+
+生产演示至少要替换 `JWT_SECRET` 和 `ANTI_FRAUD_ADMIN_TOKEN`。规则管理页通过 `X-Admin-Token` 调用 `/admin/rules/*`，令牌不要写入前端源码。
 
 启用 LangGraph：
 
