@@ -3,9 +3,14 @@ from __future__ import annotations
 import os
 from typing import Any
 
-import httpx
-
-from app.services.ai_service import OLLAMA_BASE_URL, OLLAMA_MODEL
+from app.services.llm_client import (
+    chat_payload,
+    env_int,
+    first_choice_text,
+    load_llm_config,
+    post_chat_completion,
+)
+from app.services.sanitizer import sanitize_text
 
 
 class RagReplyGenerator:
@@ -18,9 +23,15 @@ class RagReplyGenerator:
         timeout: float | None = None,
         require_retrieved_knowledge: bool | None = None,
     ) -> None:
-        self.base_url = (base_url or os.getenv("OLLAMA_BASE_URL") or OLLAMA_BASE_URL).rstrip("/")
-        self.model = model or os.getenv("OLLAMA_MODEL") or OLLAMA_MODEL
-        self.timeout = timeout or float(os.getenv("RAG_LLM_TIMEOUT", "15"))
+        self.config = load_llm_config(
+            base_url=base_url,
+            model=model,
+            timeout=timeout,
+            timeout_env="RAG_LLM_TIMEOUT",
+        )
+        self.base_url = self.config.base_url
+        self.model = self.config.model
+        self.timeout = self.config.timeout
         self.require_retrieved_knowledge = (
             require_retrieved_knowledge
             if require_retrieved_knowledge is not None
@@ -45,60 +56,60 @@ class RagReplyGenerator:
         )
         rules_text = _format_rules(risk_context.get("matched_rules", []))
         knowledge_text = _format_knowledge(retrieved_knowledge)
+        ai_assessment = risk_context.get("ai_assessment", {})
+        known_facts = risk_context.get("known_facts", {})
+        risk_dimensions = risk_context.get("risk_dimensions", {})
+        sanitized_message = sanitize_text(message)
         user_content = f"""用户刚说:
-{message}
+{sanitized_message}
 
 规则引擎判断:
 - 风险等级: {risk_context.get("risk_level")}
 - 最终风险分: {risk_context.get("risk_score")}
+- 会话阶段: {risk_context.get("session_stage") or "unknown"}
 - 识别到的风险信号: {rules_text or "暂未命中明确风险信号"}
 - 处置建议: {"；".join(risk_context.get("intervention_script", []))}
 - 推荐动作: {"；".join(risk_context.get("recommendations", []))}
+- 已确认事实: {_format_known_facts(known_facts)}
+- AI复核: {_format_ai_assessment(ai_assessment)}
+- 风险维度: {_format_risk_dimensions(risk_dimensions)}
 
 参考知识:
 {knowledge_text or "无"}
 
 直接回复用户。不要输出 JSON、字段名、内部变量、规则名、权重或报告式标题。"""
-        payload = {
-            "model": self.model,
-            "messages": [
-                {
-                    "role": "system",
+        messages = [
+            {
+                "role": "system",
                     "content": (
                         "你是一个反诈劝阻助手，但说话要像冷静、有耐心的真人朋友。"
                         "必须以给定 RiskEngine 结果为准，不得修改 risk_score、risk_level 或命中规则。"
                         f"{knowledge_instruction}"
-                        "先接住用户当前处境，再给最关键的下一步。"
+                        "先接住用户当前处境，再给最关键的一到三步。"
+                        "必须根据当前轮次变化调整建议：验证码被看见就优先改密码、踢出登录设备、冻结支付；钱被转走就优先止付、报警、保存证据；已停止/已卸载就进入复盘和证据保全。"
+                        "必须区分诈骗可能性、当前危险和事后残留风险：如果用户已经报警、冻结、断网或卸载，不要继续说成正在被实时操控。"
                         "不要使用【风险等级】【命中规则】【处置建议】这类标题。"
                         "不要复述内部规则名、分数计算或 JSON。"
-                        "语气可以口语化，但必须明确提醒停止付款、核验身份或止损。"
+                        "不要机械重复“深呼吸、冷静30秒、找家人、官方客服”这类通用句；除非当前轮次确实需要。"
+                        "语气可以口语化，但必须给出具体、可执行、和当前事实匹配的动作。"
                         "控制在 180 字以内。"
                     ),
                 },
-                {
-                    "role": "user",
-                    "content": user_content,
-                },
-            ],
-            "stream": False,
-            "options": {"temperature": 0.35, "num_predict": 512},
-        }
+            {
+                "role": "user",
+                "content": user_content,
+            },
+        ]
+        payload = chat_payload(
+            config=self.config,
+            messages=messages,
+            temperature=0.35,
+            max_tokens=env_int("RAG_LLM_MAX_TOKENS", env_int("LLM_MAX_TOKENS", 256)),
+        )
 
         try:
-            with httpx.Client(timeout=self.timeout) as client:
-                response = client.post(
-                    f"{self.base_url}/v1/chat/completions",
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
-                )
-                response.raise_for_status()
-                data = response.json()
-            reply = (
-                data.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-                .strip()
-            )
+            data = post_chat_completion(self.config, payload)
+            reply = first_choice_text(data)
             return _sanitize_reply(reply, risk_context, message)
         except Exception:
             return _sanitize_reply(fallback_reply, risk_context, message)
@@ -127,6 +138,40 @@ def _format_knowledge(items: list[dict[str, Any]]) -> str:
         content = str(item.get("content", "")).replace("\n", " ")
         lines.append(f"- {title}: {content[:180]}")
     return "\n".join(lines)
+
+
+def _format_ai_assessment(value: Any) -> str:
+    if not isinstance(value, dict) or not value.get("enabled"):
+        return "未启用或无结果"
+    reasons = value.get("reasons", [])
+    actions = value.get("recommended_actions", [])
+    reason_text = "；".join(str(item) for item in reasons[:3]) if isinstance(reasons, list) else ""
+    action_text = "；".join(str(item) for item in actions[:3]) if isinstance(actions, list) else ""
+    return (
+        f"{value.get('risk_level')}/{value.get('risk_score')} "
+        f"confidence={value.get('confidence')} "
+        f"stage={value.get('fraud_stage')} "
+        f"原因:{reason_text or '无'} "
+        f"建议:{action_text or '无'}"
+    )
+
+
+def _format_known_facts(value: Any) -> str:
+    if not isinstance(value, dict):
+        return "无"
+    active = [key for key, enabled in value.items() if enabled]
+    return "、".join(active) if active else "无"
+
+
+def _format_risk_dimensions(value: Any) -> str:
+    if not isinstance(value, dict):
+        return "未计算"
+    parts: list[str] = []
+    for key in ("scam_likelihood", "current_danger", "loss_impact", "residual_risk"):
+        item = value.get(key, {})
+        if isinstance(item, dict):
+            parts.append(f"{key}={item.get('level')}/{item.get('score')}")
+    return "；".join(parts) if parts else "未计算"
 
 
 def _looks_like_internal_echo(reply: str) -> bool:

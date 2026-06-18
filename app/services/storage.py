@@ -64,6 +64,22 @@ class SQLiteStorage:
             )
             conn.execute(
                 """
+                CREATE TABLE IF NOT EXISTS chat_messages (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    user_id INTEGER NOT NULL,
+                    user_message TEXT NOT NULL,
+                    assistant_reply TEXT NOT NULL,
+                    risk_level TEXT NOT NULL,
+                    risk_score INTEGER NOT NULL,
+                    intent TEXT NOT NULL,
+                    matched_scams_json TEXT NOT NULL DEFAULT '[]',
+                    session_stage TEXT NOT NULL,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
                 CREATE TABLE IF NOT EXISTS scenario_progress (
                     user_id INTEGER NOT NULL,
                     scenario_id TEXT NOT NULL,
@@ -99,6 +115,71 @@ class SQLiteStorage:
             self._ensure_column(conn, "reports", "reasons_json", "TEXT NOT NULL DEFAULT '[]'")
             self._ensure_column(conn, "reports", "status", "TEXT NOT NULL DEFAULT 'pending'")
             conn.commit()
+
+    def add_chat_message(
+        self,
+        *,
+        user_id: int,
+        user_message: str,
+        assistant_reply: str,
+        risk_level: str,
+        risk_score: int,
+        intent: str,
+        matched_scams: list[str],
+        session_stage: str,
+    ) -> None:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO chat_messages (
+                    user_id, user_message, assistant_reply, risk_level, risk_score,
+                    intent, matched_scams_json, session_stage
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    user_id,
+                    user_message,
+                    assistant_reply,
+                    risk_level,
+                    int(risk_score),
+                    intent,
+                    json.dumps(matched_scams, ensure_ascii=False),
+                    session_stage,
+                ),
+            )
+            conn.commit()
+
+    def list_chat_messages(self, user_id: int, limit: int = 50) -> list[dict[str, Any]]:
+        normalized_limit = max(1, min(200, int(limit)))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, user_id, user_message, assistant_reply, risk_level,
+                       risk_score, intent, matched_scams_json, session_stage, created_at
+                FROM chat_messages
+                WHERE user_id = ?
+                ORDER BY created_at DESC, id DESC
+                LIMIT ?
+                """,
+                (user_id, normalized_limit),
+            ).fetchall()
+        items = [
+            {
+                "id": int(row["id"]),
+                "user_id": int(row["user_id"]),
+                "user_message": str(row["user_message"]),
+                "assistant_reply": str(row["assistant_reply"]),
+                "risk_level": str(row["risk_level"]),
+                "risk_score": int(row["risk_score"]),
+                "intent": str(row["intent"]),
+                "matched_scams": json.loads(row["matched_scams_json"] or "[]"),
+                "session_stage": str(row["session_stage"]),
+                "created_at": str(row["created_at"]),
+            }
+            for row in rows
+        ]
+        return list(reversed(items))
 
     def create_rule_version(
         self,
@@ -557,3 +638,195 @@ class SQLiteStorage:
             }
             for idx, row in enumerate(rows)
         ]
+
+    def dashboard_snapshot(self) -> dict[str, Any]:
+        """Return read-only aggregate data for the admin dashboard."""
+        with self._connect() as conn:
+            user_rows = conn.execute(
+                "SELECT role, COUNT(*) AS count FROM users GROUP BY role"
+            ).fetchall()
+            user_totals = conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS state_users,
+                    COALESCE(SUM(points), 0) AS total_points,
+                    COALESCE(SUM(reports_submitted), 0) AS reports_submitted,
+                    COALESCE(SUM(scenarios_completed), 0) AS scenarios_completed,
+                    COALESCE(SUM(high_risk_blocks), 0) AS high_risk_blocks,
+                    COALESCE(SUM(knowledge_queries), 0) AS knowledge_queries,
+                    COALESCE(AVG(level), 0) AS avg_level
+                FROM user_state
+                """
+            ).fetchone()
+            level_rows = conn.execute(
+                """
+                SELECT level, COUNT(*) AS count
+                FROM user_state
+                GROUP BY level
+                ORDER BY level ASC
+                """
+            ).fetchall()
+            badge_rows = conn.execute("SELECT badges_json FROM user_state").fetchall()
+
+            report_totals = conn.execute(
+                """
+                SELECT
+                    COUNT(*) AS total_reports,
+                    COALESCE(AVG(score), 0) AS avg_score,
+                    COALESCE(MAX(score), 0) AS max_score
+                FROM reports
+                """
+            ).fetchone()
+            verdict_rows = conn.execute(
+                "SELECT verdict, COUNT(*) AS count FROM reports GROUP BY verdict"
+            ).fetchall()
+            status_rows = conn.execute(
+                "SELECT status, COUNT(*) AS count FROM reports GROUP BY status"
+            ).fetchall()
+            trend_rows = conn.execute(
+                """
+                SELECT DATE(created_at) AS day,
+                       COUNT(*) AS total,
+                       SUM(CASE WHEN verdict = 'high_risk' THEN 1 ELSE 0 END) AS high_risk
+                FROM reports
+                GROUP BY DATE(created_at)
+                ORDER BY day DESC
+                LIMIT 7
+                """
+            ).fetchall()
+            recent_reports = conn.execute(
+                """
+                SELECT report_id, user_id, score, verdict, matched_keywords_json,
+                       url_host, content_summary, reasons_json, status, created_at
+                FROM reports
+                ORDER BY created_at DESC, report_id DESC
+                LIMIT 12
+                """
+            ).fetchall()
+            report_keyword_rows = conn.execute(
+                "SELECT matched_keywords_json FROM reports"
+            ).fetchall()
+            host_rows = conn.execute(
+                """
+                SELECT url_host, COUNT(*) AS count, MAX(score) AS max_score
+                FROM reports
+                WHERE url_host IS NOT NULL AND url_host <> ''
+                GROUP BY url_host
+                ORDER BY count DESC, max_score DESC
+                LIMIT 10
+                """
+            ).fetchall()
+
+            scenario_rows = conn.execute(
+                """
+                SELECT scenario_id,
+                       SUM(attempts) AS attempts,
+                       SUM(completions) AS completions,
+                       COALESCE(AVG(CASE WHEN max_score > 0 THEN best_score * 100.0 / max_score ELSE 0 END), 0) AS avg_best_percent,
+                       MAX(last_completed_at) AS last_completed_at
+                FROM scenario_progress
+                GROUP BY scenario_id
+                ORDER BY completions DESC, attempts DESC, scenario_id ASC
+                LIMIT 10
+                """
+            ).fetchall()
+
+        role_counts = {str(row["role"]): int(row["count"]) for row in user_rows}
+        level_distribution = [
+            {"level": int(row["level"]), "count": int(row["count"])}
+            for row in level_rows
+        ]
+
+        badge_counts: dict[str, int] = {}
+        for row in badge_rows:
+            for badge in json.loads(row["badges_json"] or "[]"):
+                badge_counts[str(badge)] = badge_counts.get(str(badge), 0) + 1
+
+        keyword_counts: dict[str, int] = {}
+        for row in report_keyword_rows:
+            for keyword in json.loads(row["matched_keywords_json"] or "[]"):
+                keyword_counts[str(keyword)] = keyword_counts.get(str(keyword), 0) + 1
+
+        verdict_counts = {str(row["verdict"]): int(row["count"]) for row in verdict_rows}
+        status_counts = {str(row["status"]): int(row["count"]) for row in status_rows}
+
+        return {
+            "users": {
+                "total": sum(role_counts.values()),
+                "roles": role_counts,
+                "state_users": int(user_totals["state_users"] or 0),
+                "total_points": int(user_totals["total_points"] or 0),
+                "avg_level": round(float(user_totals["avg_level"] or 0), 2),
+                "level_distribution": level_distribution,
+                "badge_distribution": [
+                    {"badge": badge, "count": count}
+                    for badge, count in sorted(badge_counts.items(), key=lambda item: (-item[1], item[0]))
+                ],
+            },
+            "engagement": {
+                "reports_submitted": int(user_totals["reports_submitted"] or 0),
+                "scenarios_completed": int(user_totals["scenarios_completed"] or 0),
+                "high_risk_blocks": int(user_totals["high_risk_blocks"] or 0),
+                "knowledge_queries": int(user_totals["knowledge_queries"] or 0),
+            },
+            "reports": {
+                "total": int(report_totals["total_reports"] or 0),
+                "avg_score": round(float(report_totals["avg_score"] or 0), 2),
+                "max_score": int(report_totals["max_score"] or 0),
+                "verdict_distribution": {
+                    "safe": verdict_counts.get("safe", 0),
+                    "suspicious": verdict_counts.get("suspicious", 0),
+                    "high_risk": verdict_counts.get("high_risk", 0),
+                },
+                "status_distribution": {
+                    "pending": status_counts.get("pending", 0),
+                    "reviewed": status_counts.get("reviewed", 0),
+                    "closed": status_counts.get("closed", 0),
+                },
+                "trend": [
+                    {
+                        "day": str(row["day"]),
+                        "total": int(row["total"] or 0),
+                        "high_risk": int(row["high_risk"] or 0),
+                    }
+                    for row in reversed(trend_rows)
+                ],
+                "top_keywords": [
+                    {"keyword": keyword, "count": count}
+                    for keyword, count in sorted(keyword_counts.items(), key=lambda item: (-item[1], item[0]))[:10]
+                ],
+                "top_hosts": [
+                    {
+                        "host": str(row["url_host"]),
+                        "count": int(row["count"]),
+                        "max_score": int(row["max_score"] or 0),
+                    }
+                    for row in host_rows
+                ],
+                "recent": [
+                    {
+                        "report_id": str(row["report_id"]),
+                        "user_id": int(row["user_id"]),
+                        "score": int(row["score"]),
+                        "verdict": str(row["verdict"]),
+                        "matched_keywords": json.loads(row["matched_keywords_json"] or "[]"),
+                        "url_host": str(row["url_host"]) if row["url_host"] else None,
+                        "content_summary": str(row["content_summary"]) if row["content_summary"] else None,
+                        "reasons": json.loads(row["reasons_json"] or "[]"),
+                        "status": str(row["status"] or "pending"),
+                        "created_at": str(row["created_at"]),
+                    }
+                    for row in recent_reports
+                ],
+            },
+            "scenarios": [
+                {
+                    "scenario_id": str(row["scenario_id"]),
+                    "attempts": int(row["attempts"] or 0),
+                    "completions": int(row["completions"] or 0),
+                    "avg_best_percent": round(float(row["avg_best_percent"] or 0), 1),
+                    "last_completed_at": str(row["last_completed_at"]) if row["last_completed_at"] else None,
+                }
+                for row in scenario_rows
+            ],
+        }

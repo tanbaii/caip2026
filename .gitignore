@@ -34,6 +34,9 @@ frontend/dist/
 app/data/anti_fraud.db
 app/data/anti_fraud.db.backup-*
 
+# Local model weights
+model/
+
 # Claude local workspace
 .claude/
 

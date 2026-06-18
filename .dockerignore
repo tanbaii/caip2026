@@ -19,6 +19,7 @@ frontend/dist
 app/data/anti_fraud.db
 app/data/anti_fraud.db.backup-*
 data
+model
 
 dist
 build

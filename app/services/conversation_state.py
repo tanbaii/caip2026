@@ -35,6 +35,11 @@ _FACT_PATTERNS: dict[str, list[str]] = {
     ],
     "already_paid": [
         "已经转", "已经付", "刚转了", "已转", "已付", "转过去了", "付过了", "转了",
+        "钱被转走", "被转走了", "扣款了", "账户少了钱", "钱没了",
+    ],
+    "verification_code_exposed": [
+        "看到验证码", "看见验证码", "验证码被看到", "验证码被看见", "验证码泄露", "知道验证码",
+        "验证码发给", "验证码告诉", "验证码给了", "他看到验证码", "对方看到验证码",
     ],
     "mentions_authority": [
         "公检法", "警察", "安全账户", "公安局", "法院", "检察院", "涉嫌", "通缉", "保密办案",
@@ -60,9 +65,35 @@ _FACT_PATTERNS: dict[str, list[str]] = {
     "mentions_negation_semantics": [
         "不是诈骗", "不是骗子", "不骗人", "正规平台", "你放心", "绝对安全", "不会骗你",
     ],
+    "reported_to_police": [
+        "已经报警", "报过警", "打了110", "打了96110", "联系了96110", "警察说", "派出所",
+    ],
+    "bank_frozen": [
+        "银行冻结", "已经冻结", "冻结账户", "冻结银行卡", "申请止付", "已经止付", "支付平台冻结",
+    ],
+    "network_disconnected": [
+        "已经断网", "断开网络", "关了网络", "拔网线", "开飞行模式",
+    ],
+    "password_changed": [
+        "改了密码", "修改密码", "重置密码", "换了密码",
+    ],
+    "devices_kicked": [
+        "踢出设备", "退出所有设备", "陌生设备退出", "下线其他设备",
+    ],
+    "remote_control_removed": [
+        "卸载了会议软件", "卸载会议软件", "删了会议软件", "卸载远程", "退出屏幕共享",
+        "停止屏幕共享", "关掉屏幕共享", "结束屏幕共享",
+    ],
 }
 
 _URL_RE = re.compile(r"https?://|www\.", re.IGNORECASE)
+_SAFETY_ACTION_ACK_RE = re.compile(
+    r"(已经|已|刚刚|现在|我).{0,16}"
+    r"(停止|停了|不转了|退出|关掉|关闭|取消|卸载|删了|挂断|拉黑|报警|96110|110|联系银行|止付|冻结)"
+)
+_NO_TRANSFER_ACK_RE = re.compile(
+    r"((没|没有|未|还没).{0,4}(转账|转钱|付款|付钱)|不转了|不会转)"
+)
 
 _FOLLOW_UPS: list[tuple[set[str], str]] = [
     ({"has_transfer_request"}, "对方是否要求你先交手续费、认证费或保证金？"),
@@ -105,6 +136,7 @@ class ConversationState:
     suspected_scam_type: str = ""
     known_facts: dict[str, bool] = field(default_factory=dict)
     pending_questions: list[str] = field(default_factory=list)
+    triggered_conversation_rules: set[str] = field(default_factory=set)
     turn_count: int = 0
     last_risk_level: str = "low"
     last_intent: str = ""
@@ -143,7 +175,11 @@ class ConversationStateManager:
         state.turn_count += 1
         state.last_risk_level = risk_level
         state.last_intent = intent
-        _extract_facts(message, state.known_facts)
+        _extract_facts(
+            message,
+            state.known_facts,
+            allow_no_transfer_ack=state.turn_count > 1,
+        )
         if current_scam_type and not state.suspected_scam_type:
             state.suspected_scam_type = current_scam_type
         state.session_stage = _determine_stage(state, risk_level)
@@ -161,12 +197,17 @@ class ConversationStateManager:
         state = self.get_state(user_id)
         if state.turn_count <= 1:
             return 0, [], []
+        if state.known_facts.get("safety_action_taken"):
+            return 0, [], []
         bonus = 0
         extra_rules = []
         extra_reasons = []
         for required_facts, score, rule_name, reason in _ESCALATION_RULES:
+            if rule_name in state.triggered_conversation_rules:
+                continue
             if required_facts.issubset(k for k, v in state.known_facts.items() if v):
                 bonus += score
+                state.triggered_conversation_rules.add(rule_name)
                 extra_rules.append({
                     "rule": rule_name,
                     "evidence": sorted(required_facts),
@@ -180,8 +221,12 @@ class ConversationStateManager:
         return bonus, extra_rules, extra_reasons
 
 
-def _extract_facts(message, known_facts):
+def _extract_facts(message, known_facts, allow_no_transfer_ack: bool = False):
     text = message.lower()
+    if _SAFETY_ACTION_ACK_RE.search(text) or (
+        allow_no_transfer_ack and _NO_TRANSFER_ACK_RE.search(text)
+    ):
+        known_facts["safety_action_taken"] = True
     for fact_key, triggers in _FACT_PATTERNS.items():
         if known_facts.get(fact_key):
             continue
@@ -208,14 +253,22 @@ def _is_new_scam_topic(state, current_scam_type):
 
 def _determine_stage(state, risk_level):
     facts = state.known_facts
-    if facts.get("already_paid") or risk_level == "critical":
-        return "warning"
+    if _has_closure_action(facts):
+        return "closure_check"
+    if facts.get("already_paid"):
+        return "loss_recovery"
+    if facts.get("verification_code_exposed"):
+        return "account_recovery"
+    if facts.get("safety_action_taken"):
+        return "closure_check"
+    if risk_level == "critical":
+        return "active_blocking"
     if risk_level == "high" and state.turn_count >= 2:
-        return "warning"
+        return "active_blocking"
     if risk_level == "high":
         signal_count = sum(1 for v in facts.values() if v)
         if signal_count >= 3:
-            return "warning"
+            return "active_blocking"
         return "assessing"
     if risk_level == "medium" or state.turn_count >= 2:
         return "assessing"
@@ -223,7 +276,7 @@ def _determine_stage(state, risk_level):
 
 
 def _compute_follow_ups(state):
-    if state.session_stage == "warning":
+    if state.session_stage in {"warning", "active_blocking", "account_recovery", "loss_recovery", "closure_check", "debriefing"}:
         return []
     questions = []
     seen = set()
@@ -236,3 +289,25 @@ def _compute_follow_ups(state):
             questions.append(question)
             seen.add(question)
     return questions
+
+
+def has_safety_action_taken(conv_data: dict[str, Any]) -> bool:
+    facts = conv_data.get("known_facts", {})
+    return bool(isinstance(facts, dict) and facts.get("safety_action_taken"))
+
+
+def has_closure_action_taken(conv_data: dict[str, Any]) -> bool:
+    facts = conv_data.get("known_facts", {})
+    return bool(isinstance(facts, dict) and _has_closure_action(facts))
+
+
+def _has_closure_action(facts: dict[str, bool]) -> bool:
+    closure_keys = {
+        "reported_to_police",
+        "bank_frozen",
+        "network_disconnected",
+        "password_changed",
+        "devices_kicked",
+        "remote_control_removed",
+    }
+    return any(facts.get(key) for key in closure_keys)

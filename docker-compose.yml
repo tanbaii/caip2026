@@ -21,7 +21,7 @@ services:
   api:
     build:
       context: .
-      target: runtime
+      target: ${API_BUILD_TARGET:-rag-tools}
     container_name: caip2026-api
     depends_on:
       postgres:
@@ -36,18 +36,34 @@ services:
       CHAT_FLOW_ENGINE: ${CHAT_FLOW_ENGINE:-classic}
       CHAT_LLM_ENABLED: ${CHAT_LLM_ENABLED:-0}
       RAG_LLM_ENABLED: ${RAG_LLM_ENABLED:-0}
-      RAG_RETRIEVAL_ENABLED: ${RAG_RETRIEVAL_ENABLED:-0}
+      RAG_RETRIEVAL_ENABLED: ${RAG_RETRIEVAL_ENABLED:-1}
       RAG_TOP_K: ${RAG_TOP_K:-5}
       RAG_LLM_TIMEOUT: ${RAG_LLM_TIMEOUT:-15}
       PGVECTOR_DSN: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-anti_fraud_rag}
+      BGE_M3_MODEL_NAME: ${DOCKER_BGE_M3_MODEL_NAME:-/models/bge-m3}
+      BGE_M3_USE_FP16: ${BGE_M3_USE_FP16:-0}
       OLLAMA_BASE_URL: ${DOCKER_OLLAMA_BASE_URL:-http://host.docker.internal:11545}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-qwen3-lora}
+      LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      DASHSCOPE_API_KEY: ${DASHSCOPE_API_KEY:-}
+      BAILIAN_API_KEY: ${BAILIAN_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_TIMEOUT: ${LLM_TIMEOUT:-30}
+      LLM_ENABLE_THINKING: ${LLM_ENABLE_THINKING:-0}
+      LLM_MAX_TOKENS: ${LLM_MAX_TOKENS:-512}
+      RAG_LLM_MAX_TOKENS: ${RAG_LLM_MAX_TOKENS:-256}
+      AI_RISK_ASSESSMENT_ENABLED: ${AI_RISK_ASSESSMENT_ENABLED:-0}
+      AI_RISK_TIMEOUT: ${AI_RISK_TIMEOUT:-8}
+      AI_RISK_MAX_TOKENS: ${AI_RISK_MAX_TOKENS:-240}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     ports:
       - "${APP_PORT:-8000}:8000"
     volumes:
       - api_runtime:/app/runtime
+      - ./model/bge-m3:/models/bge-m3:ro
     healthcheck:
       test:
         [
@@ -90,7 +106,7 @@ services:
       MODELSCOPE_BGE_M3_MODEL_ID: ${MODELSCOPE_BGE_M3_MODEL_ID:-BAAI/bge-m3}
       MODELSCOPE_BGE_M3_LOCAL_DIR: /models/bge-m3
     volumes:
-      - modelscope_models:/models
+      - ./model:/models
       - modelscope_cache:/root/.cache/modelscope
     command:
       [
@@ -118,13 +134,10 @@ services:
       BGE_M3_MODEL_NAME: /models/bge-m3
       BGE_M3_USE_FP16: ${BGE_M3_USE_FP16:-0}
     volumes:
-      - modelscope_models:/models
+      - ./model/bge-m3:/models/bge-m3:ro
       - modelscope_cache:/root/.cache/modelscope
     command: >
-      sh -c "python scripts/download_modelscope_model.py
-      --model-id ${MODELSCOPE_BGE_M3_MODEL_ID:-BAAI/bge-m3}
-      --local-dir /models/bge-m3
-      && python scripts/embed_knowledge_chunks.py
+      sh -c "python scripts/embed_knowledge_chunks.py
       --dsn postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@postgres:5432/${POSTGRES_DB:-anti_fraud_rag}
       --model /models/bge-m3"
     restart: "no"
@@ -132,5 +145,4 @@ services:
 volumes:
   api_runtime:
   pgvector_data:
-  modelscope_models:
   modelscope_cache:

@@ -11,6 +11,8 @@ from app.services.dialogue_service import (
     _last_history_score,
     _top_scam_type,
 )
+from app.services.conversation_state import has_closure_action_taken, has_safety_action_taken
+from app.services.risk_dimensions import build_risk_dimensions, overall_level_from_dimensions
 from app.services.sanitizer import sanitize_text
 
 try:  # pragma: no cover - exercised when langgraph is installed in deployment.
@@ -37,6 +39,7 @@ class ChatWorkflowState(TypedDict, total=False):
     recommendations: list[str]
     breakdown: dict[str, Any]
     conv_data: dict[str, Any]
+    risk_dimensions: dict[str, Any]
     retrieved_knowledge: list[dict[str, Any]]
     reply: str
     action: str
@@ -79,6 +82,7 @@ class ChatWorkflowRunner:
         builder.add_node("evaluate_risk", self._evaluate_risk)
         builder.add_node("update_conversation", self._update_conversation)
         builder.add_node("retrieve_knowledge", self._retrieve_knowledge)
+        builder.add_node("generate_warning_reply", self._generate_warning_reply)
         builder.add_node("generate_reply", self._generate_reply)
         builder.add_node("award_and_persist", self._award_and_persist)
         builder.add_node("build_response", self._build_response)
@@ -86,7 +90,15 @@ class ChatWorkflowRunner:
         builder.add_edge(START, "recognize_context")
         builder.add_edge("recognize_context", "evaluate_risk")
         builder.add_edge("evaluate_risk", "update_conversation")
-        builder.add_edge("update_conversation", "retrieve_knowledge")
+        builder.add_conditional_edges(
+            "update_conversation",
+            self.route_after_conversation,
+            {
+                "generate_warning_reply": "generate_warning_reply",
+                "retrieve_knowledge": "retrieve_knowledge",
+            },
+        )
+        builder.add_edge("generate_warning_reply", "award_and_persist")
         builder.add_edge("retrieve_knowledge", "generate_reply")
         builder.add_edge("generate_reply", "award_and_persist")
         builder.add_edge("award_and_persist", "build_response")
@@ -96,17 +108,35 @@ class ChatWorkflowRunner:
         return builder.compile()
 
     def _invoke_sequential(self, state: ChatWorkflowState) -> ChatWorkflowState:
-        for node in (
-            self._recognize_context,
-            self._evaluate_risk,
-            self._update_conversation,
-            self._retrieve_knowledge,
-            self._generate_reply,
-            self._award_and_persist,
-            self._build_response,
-        ):
+        for node in (self._recognize_context, self._evaluate_risk, self._update_conversation):
+            state.update(node(state))
+        if self.route_after_conversation(state) == "generate_warning_reply":
+            state.update(self._generate_warning_reply(state))
+        else:
+            state.update(self._retrieve_knowledge(state))
+            state.update(self._generate_reply(state))
+        for node in (self._award_and_persist, self._build_response):
             state.update(node(state))
         return state
+
+    def workflow_nodes(self) -> list[str]:
+        return [
+            "recognize_context",
+            "evaluate_risk",
+            "update_conversation",
+            "generate_warning_reply",
+            "retrieve_knowledge",
+            "generate_reply",
+            "award_and_persist",
+            "build_response",
+        ]
+
+    @staticmethod
+    def route_after_conversation(state: ChatWorkflowState) -> str:
+        conv_data = state.get("conv_data", {})
+        if conv_data.get("session_stage") in {"warning", "active_blocking", "account_recovery", "loss_recovery"}:
+            return "generate_warning_reply"
+        return "retrieve_knowledge"
 
     def _recognize_context(self, state: ChatWorkflowState) -> dict[str, Any]:
         request = state["request"]
@@ -196,28 +226,93 @@ class ChatWorkflowRunner:
             conv_data = self.service._conv_state.recompute_stage(request.user_id, risk_level)
 
         previous_score = _last_history_score(state["history"])
-        if previous_score is not None and previous_score > total_score:
+        if (
+            previous_score is not None
+            and previous_score > total_score
+            and not has_safety_action_taken(conv_data)
+            and not has_closure_action_taken(conv_data)
+        ):
             total_score = previous_score
             breakdown["context_score_floor"] = previous_score
             breakdown["total"] = total_score
             risk_level = self.service.risk_engine._score_to_level(total_score)
             conv_data = self.service._conv_state.recompute_stage(request.user_id, risk_level)
 
+        (
+            total_score,
+            risk_level,
+            intervention_script,
+            recommendations,
+            breakdown,
+            all_matched_rules,
+            conv_data,
+        ) = self.service._apply_ai_risk_review(
+            request=request,
+            history=state["history"],
+            total_score=total_score,
+            risk_level=risk_level,
+            breakdown=breakdown,
+            all_matched_rules=all_matched_rules,
+            conv_data=conv_data,
+        )
+
         return {
             "risk": risk,
             "all_matched_rules": all_matched_rules,
             "total_score": total_score,
             "risk_level": risk_level,
-            "intervention_script": self.service.risk_engine._build_intervention(
-                risk_level, request.user_profile.role
-            ),
-            "recommendations": self.service.risk_engine._build_recommendations(risk_level),
+            "intervention_script": intervention_script,
+            "recommendations": recommendations,
             "breakdown": breakdown,
             "conv_data": conv_data,
+            "risk_dimensions": build_risk_dimensions(
+                risk_score=total_score,
+                risk_level=risk_level,
+                conv_data=conv_data,
+            ),
         }
 
     def _retrieve_knowledge(self, state: ChatWorkflowState) -> dict[str, Any]:
         return {"retrieved_knowledge": self.service._retrieve_knowledge(state["request"].message)}
+
+    def _generate_warning_reply(self, state: ChatWorkflowState) -> dict[str, Any]:
+        request = state["request"]
+        conv_data = state["conv_data"]
+        reply = self.service._build_reply(
+            message=request.message,
+            intent=state["intent"],
+            matched_scams=state["matched_scams"],
+            risk_level=state["risk_level"],
+            user_role=request.user_profile.role,
+            stage="warning",
+            pending_questions=[],
+            known_facts=conv_data["known_facts"],
+            turn_count=conv_data["turn_count"],
+            risk_dimensions=state["risk_dimensions"],
+        )
+        if self.service.rag_reply_generator:
+            reply = self.service.rag_reply_generator.generate(
+                message=request.message,
+                risk_context={
+                    "risk_score": state["total_score"],
+                    "risk_level": state["risk_level"],
+                    "matched_rules": state["all_matched_rules"],
+                    "risk_breakdown": state["breakdown"],
+                    "intervention_script": state["intervention_script"],
+                    "recommendations": state["recommendations"],
+                    "session_stage": "warning",
+                    "known_facts": conv_data["known_facts"],
+                    "ai_assessment": state["breakdown"].get("ai_assessment", {}),
+                    "risk_dimensions": state["risk_dimensions"],
+                },
+                retrieved_knowledge=[],
+                fallback_reply=reply,
+            )
+        return {
+            "reply": reply,
+            "retrieved_knowledge": [],
+            "conv_data": {**conv_data, "pending_questions": []},
+        }
 
     def _generate_reply(self, state: ChatWorkflowState) -> dict[str, Any]:
         request = state["request"]
@@ -232,6 +327,7 @@ class ChatWorkflowRunner:
             pending_questions=conv_data["pending_questions"],
             known_facts=conv_data["known_facts"],
             turn_count=conv_data["turn_count"],
+            risk_dimensions=state["risk_dimensions"],
         )
 
         if self.service.rag_reply_generator:
@@ -244,6 +340,10 @@ class ChatWorkflowRunner:
                     "risk_breakdown": state["breakdown"],
                     "intervention_script": state["intervention_script"],
                     "recommendations": state["recommendations"],
+                    "session_stage": conv_data["session_stage"],
+                    "known_facts": conv_data["known_facts"],
+                    "ai_assessment": state["breakdown"].get("ai_assessment", {}),
+                    "risk_dimensions": state["risk_dimensions"],
                 },
                 retrieved_knowledge=state["retrieved_knowledge"],
                 fallback_reply=reply,
@@ -255,9 +355,10 @@ class ChatWorkflowRunner:
         request = state["request"]
         risk_level = state["risk_level"]
         intent = state["intent"]
+        current_action_level = overall_level_from_dimensions(state["risk_dimensions"])
 
         action = "daily_chat"
-        if risk_level in {"high", "critical"}:
+        if current_action_level in {"high", "critical"}:
             action = "risk_block"
         elif intent in {"ask_knowledge", "report_content"}:
             action = "knowledge_query"
@@ -278,6 +379,16 @@ class ChatWorkflowRunner:
             }
         ]
         self.service._history[request.user_id] = new_history[-12:]
+
+        response_preview = {
+            "reply": state["reply"],
+            "intent": intent,
+            "matched_scams": state["matched_names"],
+            "risk_level": risk_level,
+            "risk_score": state["total_score"],
+            "session_stage": state["conv_data"]["session_stage"],
+        }
+        self.service.persist_chat_exchange(request.user_id, response_preview, request.message)
 
         return {
             "action": action,
@@ -304,7 +415,13 @@ class ChatWorkflowRunner:
                 "latency_ms": latency_ms,
                 "matched_rules": state["all_matched_rules"],
                 "risk_breakdown": state["breakdown"],
-                "next_actions": _build_chat_next_actions(state["risk_level"]),
+                "ai_risk_assessment": state["breakdown"].get("ai_assessment", {}),
+                "risk_decision": str(state["breakdown"].get("ai_assessment", {}).get("decision", "")),
+                "risk_dimensions": state["risk_dimensions"],
+                "current_danger_level": str(state["risk_dimensions"]["current_danger"]["level"]),
+                "scam_likelihood_level": str(state["risk_dimensions"]["scam_likelihood"]["level"]),
+                "residual_risk_level": str(state["risk_dimensions"]["residual_risk"]["level"]),
+                "next_actions": _build_chat_next_actions(overall_level_from_dimensions(state["risk_dimensions"])),
                 "session_stage": conv_data["session_stage"],
                 "known_facts": conv_data["known_facts"],
                 "pending_questions": conv_data["pending_questions"],

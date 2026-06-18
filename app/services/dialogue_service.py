@@ -5,11 +5,17 @@ import time
 from typing import Any
 
 from app.models.schemas import ChatRequest
+from app.services.ai_risk_service import AIRiskAssessor, merge_rule_and_ai_risk
 from app.services.gamification import GamificationService
 from app.services.intent_recognizer import IntentRecognizer
 from app.services.knowledge_base import KnowledgeBase
-from app.services.conversation_state import ConversationStateManager
+from app.services.conversation_state import (
+    ConversationStateManager,
+    has_closure_action_taken,
+    has_safety_action_taken,
+)
 from app.services.risk_engine import RiskEngine
+from app.services.risk_dimensions import build_risk_dimensions, overall_level_from_dimensions
 from app.services.sanitizer import sanitize_text
 
 
@@ -22,6 +28,8 @@ class DialogueService:
         gamification: GamificationService,
         knowledge_retriever: Any | None = None,
         rag_reply_generator: Any | None = None,
+        ai_risk_assessor: AIRiskAssessor | None = None,
+        storage: Any | None = None,
     ) -> None:
         self.knowledge_base = knowledge_base
         self.intent_recognizer = intent_recognizer
@@ -29,6 +37,8 @@ class DialogueService:
         self.gamification = gamification
         self.knowledge_retriever = knowledge_retriever
         self.rag_reply_generator = rag_reply_generator
+        self.ai_risk_assessor = ai_risk_assessor
+        self.storage = storage
         self._history: dict[str, list[dict[str, str]]] = {}
         self._url_pattern = re.compile(r"(https?://\S+|www\.\S+)", re.IGNORECASE)
         self._conv_state = ConversationStateManager()
@@ -103,7 +113,12 @@ class DialogueService:
             conv_data = self._conv_state.recompute_stage(request.user_id, risk_level)
 
         previous_score = _last_history_score(history)
-        if previous_score is not None and previous_score > total_score:
+        if (
+            previous_score is not None
+            and previous_score > total_score
+            and not has_safety_action_taken(conv_data)
+            and not has_closure_action_taken(conv_data)
+        ):
             total_score = previous_score
             breakdown["context_score_floor"] = previous_score
             breakdown["total"] = total_score
@@ -112,7 +127,31 @@ class DialogueService:
             recommendations = self.risk_engine._build_recommendations(risk_level)
             conv_data = self._conv_state.recompute_stage(request.user_id, risk_level)
 
+        (
+            total_score,
+            risk_level,
+            intervention_script,
+            recommendations,
+            breakdown,
+            all_matched_rules,
+            conv_data,
+        ) = self._apply_ai_risk_review(
+            request=request,
+            history=history,
+            total_score=total_score,
+            risk_level=risk_level,
+            breakdown=breakdown,
+            all_matched_rules=all_matched_rules,
+            conv_data=conv_data,
+        )
+
         retrieved_knowledge = self._retrieve_knowledge(request.message)
+        risk_dimensions = build_risk_dimensions(
+            risk_score=total_score,
+            risk_level=risk_level,
+            conv_data=conv_data,
+        )
+        current_action_level = overall_level_from_dimensions(risk_dimensions)
 
         reply = self._build_reply(
             message=request.message,
@@ -124,6 +163,7 @@ class DialogueService:
             pending_questions=conv_data["pending_questions"],
             known_facts=conv_data["known_facts"],
             turn_count=conv_data["turn_count"],
+            risk_dimensions=risk_dimensions,
         )
 
         if self.rag_reply_generator:
@@ -136,13 +176,17 @@ class DialogueService:
                     "risk_breakdown": breakdown,
                     "intervention_script": intervention_script,
                     "recommendations": recommendations,
+                    "session_stage": conv_data["session_stage"],
+                    "known_facts": conv_data["known_facts"],
+                    "ai_assessment": breakdown.get("ai_assessment", {}),
+                    "risk_dimensions": risk_dimensions,
                 },
                 retrieved_knowledge=retrieved_knowledge,
                 fallback_reply=reply,
             )
 
         action = "daily_chat"
-        if risk_level in {"high", "critical"}:
+        if current_action_level in {"high", "critical"}:
             action = "risk_block"
         elif intent in {"ask_knowledge", "report_content"}:
             action = "knowledge_query"
@@ -166,7 +210,7 @@ class DialogueService:
 
         latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
-        return {
+        response = {
             "reply": reply,
             "intent": intent,
             "matched_scams": matched_names,
@@ -180,7 +224,13 @@ class DialogueService:
             "latency_ms": latency_ms,
             "matched_rules": all_matched_rules,
             "risk_breakdown": breakdown,
-            "next_actions": _build_chat_next_actions(risk_level),
+            "ai_risk_assessment": breakdown.get("ai_assessment", {}),
+            "risk_decision": str(breakdown.get("ai_assessment", {}).get("decision", "")),
+            "risk_dimensions": risk_dimensions,
+            "current_danger_level": str(risk_dimensions["current_danger"]["level"]),
+            "scam_likelihood_level": str(risk_dimensions["scam_likelihood"]["level"]),
+            "residual_risk_level": str(risk_dimensions["residual_risk"]["level"]),
+            "next_actions": _build_chat_next_actions(current_action_level),
             "session_stage": conv_data["session_stage"],
             "known_facts": conv_data["known_facts"],
             "pending_questions": conv_data["pending_questions"],
@@ -189,6 +239,31 @@ class DialogueService:
             "retrieved_knowledge": retrieved_knowledge,
             "ruleset_versions": self.risk_engine.ruleset_versions,
         }
+        self.persist_chat_exchange(request.user_id, response, request.message)
+        return response
+
+    def persist_chat_exchange(
+        self,
+        user_id: int,
+        response: dict[str, Any],
+        user_message: str,
+    ) -> None:
+        if not self.storage:
+            return
+        try:
+            self.storage.add_chat_message(
+                user_id=user_id,
+                user_message=sanitize_text(user_message),
+                assistant_reply=sanitize_text(str(response.get("reply", ""))),
+                risk_level=str(response.get("risk_level", "low")),
+                risk_score=int(response.get("risk_score", 0)),
+                intent=str(response.get("intent", "")),
+                matched_scams=[str(item) for item in response.get("matched_scams", [])],
+                session_stage=str(response.get("session_stage", "collecting")),
+            )
+        except Exception:
+            # Persistence must not block real-time risk intervention.
+            return
 
     def _retrieve_knowledge(self, message: str) -> list[dict[str, Any]]:
         if not self.knowledge_retriever:
@@ -197,6 +272,125 @@ class DialogueService:
             return list(self.knowledge_retriever.retrieve(message))
         except Exception:
             return []
+
+    def _apply_ai_risk_review(
+        self,
+        *,
+        request: ChatRequest,
+        history: list[dict[str, str]],
+        total_score: int,
+        risk_level: str,
+        breakdown: dict[str, Any],
+        all_matched_rules: list[dict[str, Any]],
+        conv_data: dict[str, Any],
+    ) -> tuple[
+        int,
+        str,
+        list[str],
+        list[str],
+        dict[str, Any],
+        list[dict[str, Any]],
+        dict[str, Any],
+    ]:
+        known_facts = conv_data.get("known_facts", {})
+        fact_floor = 0
+        fact_rule: dict[str, Any] | None = None
+        if isinstance(known_facts, dict) and known_facts.get("already_paid"):
+            fact_floor = 70
+            fact_rule = {
+                "rule": "conversation_funds_lost",
+                "evidence": ["already_paid"],
+                "reason": "用户表述资金已转出或被扣款，按已受骗止损阶段处理",
+                "rationale": "资金已经损失时，处置优先级高于一般风险识别。",
+            }
+        elif isinstance(known_facts, dict) and known_facts.get("verification_code_exposed"):
+            fact_floor = 55
+            fact_rule = {
+                "rule": "conversation_code_exposed",
+                "evidence": ["verification_code_exposed"],
+                "reason": "用户表述验证码可能已泄露，按账号恢复阶段处理",
+                "rationale": "验证码泄露可能导致账号接管或非本人交易。",
+            }
+        elif isinstance(known_facts, dict) and known_facts.get("has_remote_control"):
+            fact_floor = 45
+            fact_rule = {
+                "rule": "conversation_remote_control",
+                "evidence": ["has_remote_control"],
+                "reason": "用户表述正在或曾经开启屏幕共享/远程控制",
+                "rationale": "远程控制和屏幕共享会暴露验证码、账户和支付操作。",
+            }
+
+        if fact_rule and total_score < fact_floor:
+            delta = fact_floor - total_score
+            total_score = fact_floor
+            risk_level = self.risk_engine._score_to_level(total_score)
+            breakdown["conversation_fact_floor"] = fact_floor
+            breakdown["total"] = total_score
+            all_matched_rules = [
+                *all_matched_rules,
+                {
+                    "rule": fact_rule["rule"],
+                    "evidence": fact_rule["evidence"],
+                    "weight": delta,
+                    "reason": fact_rule["reason"],
+                    "rule_version": "1.0",
+                    "ruleset_version": "conversation-1.1",
+                    "rationale": fact_rule["rationale"],
+                },
+            ]
+            conv_data = self._conv_state.recompute_stage(request.user_id, risk_level)
+
+        if not self.ai_risk_assessor:
+            breakdown.setdefault("ai_assessment", {"enabled": False})
+            return (
+                total_score,
+                risk_level,
+                self.risk_engine._build_intervention(risk_level, request.user_profile.role),
+                self.risk_engine._build_recommendations(risk_level),
+                breakdown,
+                all_matched_rules,
+                conv_data,
+            )
+
+        assessment = self.ai_risk_assessor.assess(
+            message=request.message,
+            history=history,
+            rule_context={
+                "risk_score": total_score,
+                "risk_level": risk_level,
+                "session_stage": conv_data.get("session_stage"),
+                "known_facts": conv_data.get("known_facts", {}),
+                "matched_rule_names": [
+                    str(item.get("rule") or item.get("name") or "")
+                    for item in all_matched_rules[:12]
+                    if isinstance(item, dict)
+                ],
+            },
+        )
+        merged = merge_rule_and_ai_risk(
+            rule_score=total_score,
+            rule_level=risk_level,
+            ai_assessment=assessment,
+        )
+        breakdown["ai_assessment"] = merged.breakdown()
+        if merged.matched_rule:
+            all_matched_rules = [*all_matched_rules, merged.matched_rule]
+        if merged.final_score != total_score:
+            total_score = merged.final_score
+            risk_level = merged.final_level
+            breakdown["ai_score"] = merged.ai_score_delta
+            breakdown["total"] = total_score
+            conv_data = self._conv_state.recompute_stage(request.user_id, risk_level)
+
+        return (
+            total_score,
+            risk_level,
+            self.risk_engine._build_intervention(risk_level, request.user_profile.role),
+            self.risk_engine._build_recommendations(risk_level),
+            breakdown,
+            all_matched_rules,
+            conv_data,
+        )
 
     def _build_reply(
         self,
@@ -209,6 +403,7 @@ class DialogueService:
         pending_questions: list[str] | None = None,
         known_facts: dict[str, bool] | None = None,
         turn_count: int = 1,
+        risk_dimensions: dict[str, Any] | None = None,
     ) -> str:
         role_prefix = "同学" if user_role == "student" else "你"
 
@@ -223,7 +418,16 @@ class DialogueService:
             )
 
         # --- Stage-aware reply ---
-        if stage == "warning":
+        if stage in {"closure_check", "debriefing"}:
+            return self._build_closure_check_reply(role_prefix, known_facts or {})
+
+        if stage == "loss_recovery":
+            return self._build_loss_recovery_reply(role_prefix, known_facts or {})
+
+        if stage == "account_recovery":
+            return self._build_account_recovery_reply(role_prefix, known_facts or {})
+
+        if stage in {"warning", "active_blocking"}:
             return self._build_warning_reply(role_prefix, matched_scams, risk_level, known_facts or {})
 
         if matched_scams:
@@ -261,33 +465,83 @@ class DialogueService:
         return "".join(parts)
 
     @staticmethod
+    def _build_closure_check_reply(
+        role_prefix: str,
+        known_facts: dict[str, bool],
+    ) -> str:
+        parts = [f"{role_prefix}你已经在做正确的止损动作了，现在从“紧急阻断”转到收尾检查。"]
+        if known_facts.get("already_paid"):
+            parts.append("确认银行或支付平台的止付/冻结是否受理，记录工单号或报警回执。")
+        else:
+            parts.append("接下来不要恢复联系、不要重新开启屏幕共享，也不要再点对方发来的链接。")
+        if known_facts.get("verification_code_exposed"):
+            parts.append("再检查一次账号安全：改密、退出陌生设备、关闭免密支付。")
+        parts.append("把聊天记录、对方账号、链接和软件截图保存下来即可，不需要反复和对方周旋。")
+        return "".join(parts)
+
+    @staticmethod
+    def _build_loss_recovery_reply(
+        role_prefix: str,
+        known_facts: dict[str, bool],
+    ) -> str:
+        return (
+            f"{role_prefix}钱已经被转走时，重点不是再判断真假，而是止损取证："
+            "立刻联系银行或支付平台申请止付/冻结，同时拨打110或96110报案。"
+            "保存聊天记录、收款账户、转账单号、会议软件和屏幕共享截图；不要再回复对方，也不要按对方要求撤销报案。"
+        )
+
+    @staticmethod
+    def _build_account_recovery_reply(
+        role_prefix: str,
+        known_facts: dict[str, bool],
+    ) -> str:
+        return (
+            f"{role_prefix}验证码已经被对方看到，就按账号可能被接管处理："
+            "立刻退出屏幕共享，在官方App里改密码，退出陌生登录设备，关闭免密支付或临时冻结账户。"
+            "如果银行卡、支付账户或社交账号出现异常，马上联系官方客服或96110处理。"
+        )
+
+    @staticmethod
     def _build_warning_reply(
         role_prefix: str,
         matched_scams: list[dict[str, Any]],
         risk_level: str,
         known_facts: dict[str, bool],
     ) -> str:
-        parts = [f"{role_prefix}当前情况非常危险，请立即执行以下操作："]
-
         if known_facts.get("already_paid"):
-            parts.append("你已经转过钱了，请立刻联系银行申请紧急止付，并拨打110报案。")
-        else:
-            parts.append("立即停止所有转账和验证码操作。")
+            return (
+                f"{role_prefix}这已经不是普通提醒了，先按止损流程来：马上联系银行或支付平台申请止付/冻结，"
+                "同时拨打110或96110说明“疑似诈骗转账”。不要再回复对方，也不要按对方说的撤销报案。"
+                "把聊天记录、收款账户、转账单号和屏幕共享软件截图保存好。"
+            )
+
+        if known_facts.get("has_verification_code_request"):
+            return (
+                f"{role_prefix}验证码如果被对方看到，先按账户可能被接管处理：立刻退出屏幕共享，"
+                "在官方App里修改密码，踢出陌生登录设备，关闭免密支付或临时冻结账户。"
+                "不要再输入新的验证码，也不要点对方发来的任何链接。"
+            )
 
         if known_facts.get("has_remote_control"):
-            parts.append("退出屏幕共享，卸载远程控制软件。")
+            return (
+                f"{role_prefix}现在最关键是切断对方视线：马上停止屏幕共享，关闭会议软件，"
+                "把远程控制/会议软件卸载或结束进程。之后检查银行、支付平台和社交账号有没有异常登录。"
+            )
+
+        if known_facts.get("mentions_authority"):
+            return (
+                f"{role_prefix}如果对方自称公检法或安全账户，直接挂断。真正的公检法不会让你转账、共享屏幕或提供验证码。"
+                "用官方号码重新核实，不要沿用对方给你的电话和链接。"
+            )
 
         if matched_scams:
             top = matched_scams[0]
-            parts.append("当前情况与“" + top.get("name", "") + "”高度吻合。")
+            return (
+                f"{role_prefix}这和“{top.get('name', '诈骗话术')}”很像。先停止付款、验证码和链接操作，"
+                "把对方账号、链接、收款信息截图留好，再通过官方渠道核实。"
+            )
 
-        if known_facts.get("mentions_authority"):
-            parts.append("公检法不会通过电话要求转账或共享屏幕，请不要相信。")
-
-        if risk_level == "critical":
-            parts.append("请保留所有聊天记录和转账凭证，作为报案证据。")
-
-        return "".join(parts)
+        return f"{role_prefix}当前风险偏高，先停止付款、验证码和屏幕共享相关操作，再补充对方具体让你做哪一步，我来帮你继续判断。"
 
 
 def _build_chat_next_actions(risk_level: str) -> list[str]:
@@ -359,12 +613,18 @@ def _build_conversation_summary(conv_data: dict) -> str:
         "collecting": "正在收集信息",
         "assessing": "正在评估风险",
         "warning": "已触发高危预警",
+        "active_blocking": "正在紧急阻断",
+        "account_recovery": "正在处理账号泄露风险",
+        "loss_recovery": "正在止损取证",
+        "closure_check": "正在收尾检查",
         "debriefing": "正在复盘总结",
     }.get(stage, stage)
 
     parts = [f"第{turn}轮对话 | {stage_text}"]
     if true_facts:
         parts.append(f"已识别{len(true_facts)}条风险信号")
-    if stage == "warning":
-        parts.append("请立即执行止损操作")
+    if stage in {"warning", "active_blocking"}:
+        parts.append("请立即执行阻断操作")
+    if stage in {"account_recovery", "loss_recovery", "closure_check"}:
+        parts.append("请按当前阶段完成收尾动作")
     return " · ".join(parts)

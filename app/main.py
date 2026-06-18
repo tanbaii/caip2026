@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from app.models.schemas import (
     AIChatRequest,
     AIChatResponse,
+    ChatHistoryResponse,
     ChatRequest,
     ChatResetRequest,
     ChatResponse,
@@ -37,7 +38,9 @@ from app.models.schemas import (
     UserProgressResponse,
 )
 from app.services.auth_service import AuthService
+from app.services.ai_risk_service import AIRiskAssessor
 from app.services.chat_workflow import ChatWorkflowRunner
+from app.services.dashboard_service import DashboardService
 from app.services.dialogue_service import DialogueService
 from app.services.env_loader import load_dotenv
 from app.services.gamification import GamificationService
@@ -79,6 +82,7 @@ ALLOWED_ORIGINS = (
 # ── Rate Limiting (in-memory, no external deps) ──
 RATE_LIMIT_RPM = int(os.getenv("RATE_LIMIT_RPM", "0"))  # 0 = disabled
 REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "1").lower() not in {"0", "false", "no"}
+RAG_RETRIEVAL_ENABLED = os.getenv("RAG_RETRIEVAL_ENABLED", "1").lower() not in {"0", "false", "no"}
 
 knowledge_base = KnowledgeBase(BASE_DIR / "data" / "knowledge_base.json")
 intent_recognizer = IntentRecognizer()
@@ -86,6 +90,11 @@ risk_engine = RiskEngine()
 _db_path = os.getenv("DB_PATH") or str(BASE_DIR / "data" / "anti_fraud.db")
 storage = SQLiteStorage(Path(_db_path))
 rule_management_service = RuleManagementService(risk_engine=risk_engine, storage=storage)
+dashboard_service = DashboardService(
+    storage=storage,
+    knowledge_base=knowledge_base,
+    rule_management=rule_management_service,
+)
 gamification_service = GamificationService(storage=storage)
 auth_service = AuthService(storage=storage, secret_key=JWT_SECRET)
 report_service = ReportService(
@@ -99,7 +108,7 @@ scenario_service = ScenarioService(
 )
 knowledge_retriever = (
     KnowledgeRetriever.from_env()
-    if os.getenv("RAG_RETRIEVAL_ENABLED", "1").lower() not in {"0", "false", "no"}
+    if RAG_RETRIEVAL_ENABLED
     else None
 )
 rag_reply_generator = (
@@ -110,6 +119,7 @@ rag_reply_generator = (
     )
     else None
 )
+ai_risk_assessor = AIRiskAssessor()
 dialogue_service = DialogueService(
     knowledge_base=knowledge_base,
     intent_recognizer=intent_recognizer,
@@ -117,6 +127,8 @@ dialogue_service = DialogueService(
     gamification=gamification_service,
     knowledge_retriever=knowledge_retriever,
     rag_reply_generator=rag_reply_generator,
+    ai_risk_assessor=ai_risk_assessor,
+    storage=storage,
 )
 if os.getenv("CHAT_FLOW_ENGINE", "classic").lower() in {"langgraph", "graph"}:
     dialogue_service = ChatWorkflowRunner(dialogue_service)
@@ -199,6 +211,14 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "anti-fraud-dialogue"}
 
 
+@app.get("/health/rag")
+def rag_health() -> dict[str, object]:
+    return KnowledgeRetriever.health_from_env(
+        knowledge_retriever,
+        enabled=RAG_RETRIEVAL_ENABLED,
+    )
+
+
 def _resolve_user(
     requested_user_id: int,
     authorization: str | None,
@@ -247,6 +267,23 @@ def reset_chat(
     _resolve_user(request.user_id, authorization)
     dialogue_service.reset_conversation(request.user_id)
     return {"message": "对话状态已重置"}
+
+
+@app.get("/users/{user_id}/chat/history", response_model=ChatHistoryResponse)
+def get_user_chat_history(
+    user_id: int,
+    limit: int = Query(default=50, ge=1, le=200),
+    authorization: str | None = Header(default=None),
+) -> ChatHistoryResponse:
+    _resolve_user(user_id, authorization)
+    items = storage.list_chat_messages(user_id=user_id, limit=limit)
+    return ChatHistoryResponse.model_validate(
+        {
+            "user_id": user_id,
+            "total": len(items),
+            "items": items,
+        }
+    )
 
 
 @app.post("/report", response_model=ReportResponse)
@@ -391,6 +428,14 @@ def rule_overview(
 ) -> dict[str, object]:
     _require_admin(x_admin_token)
     return rule_management_service.overview()
+
+
+@app.get("/admin/dashboard/summary")
+def admin_dashboard_summary(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_admin(x_admin_token)
+    return dashboard_service.summary()
 
 
 @app.get("/admin/rules/history")

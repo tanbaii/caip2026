@@ -34,6 +34,12 @@ class ChatResponse(BaseModel):
     latency_ms: float
     matched_rules: list[dict[str, Any]] = Field(default_factory=list)
     risk_breakdown: dict[str, Any] = Field(default_factory=dict)
+    ai_risk_assessment: dict[str, Any] = Field(default_factory=dict)
+    risk_decision: str = ""
+    risk_dimensions: dict[str, Any] = Field(default_factory=dict)
+    current_danger_level: str = "low"
+    scam_likelihood_level: str = "low"
+    residual_risk_level: str = "low"
     next_actions: list[str] = Field(default_factory=list)
     session_stage: str = "collecting"
     known_facts: dict[str, bool] = Field(default_factory=dict)
@@ -46,6 +52,25 @@ class ChatResponse(BaseModel):
 
 class ChatResetRequest(BaseModel):
     user_id: int = Field(ge=1)
+
+
+class ChatHistoryItem(BaseModel):
+    id: int
+    user_id: int
+    user_message: str
+    assistant_reply: str
+    risk_level: Literal["low", "medium", "high", "critical"]
+    risk_score: int
+    intent: str
+    matched_scams: list[str] = Field(default_factory=list)
+    session_stage: str
+    created_at: str
+
+
+class ChatHistoryResponse(BaseModel):
+    user_id: int
+    total: int
+    items: list[ChatHistoryItem]
 
 
 class ReportRequest(BaseModel):
@@ -109,6 +134,7 @@ class ScamEntryCreate(BaseModel):
     typical_case: str = Field(min_length=5, max_length=300)
     prevention: list[str] = Field(min_length=1)
     legal_refs: list[str] = Field(min_length=1)
+    sources: list[dict[str, str]] = Field(default_factory=list)
 
 
 class RuleUpdateRequest(BaseModel):

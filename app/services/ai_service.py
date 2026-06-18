@@ -2,9 +2,20 @@ from __future__ import annotations
 
 import httpx
 
+from app.services.llm_client import (
+    DEFAULT_OLLAMA_BASE_URL,
+    DEFAULT_OLLAMA_MODEL,
+    apost_chat_completion,
+    chat_payload,
+    env_int,
+    first_choice_text,
+    load_llm_config,
+)
+from app.services.sanitizer import sanitize_text
+
 # ── Ollama 配置（WSL 本地部署）──
-OLLAMA_BASE_URL = "http://localhost:11545"
-OLLAMA_MODEL = "qwen3-lora"
+OLLAMA_BASE_URL = DEFAULT_OLLAMA_BASE_URL
+OLLAMA_MODEL = DEFAULT_OLLAMA_MODEL
 REQUEST_TIMEOUT = 90  # R1 推理模型较慢，给足时间
 
 SYSTEM_PROMPT = """你是一个专业的反诈安全顾问助手「反诈护盾」。你的任务是帮助用户识别、预防和应对各类诈骗行为。
@@ -39,8 +50,13 @@ class AIService:
         base_url: str | None = None,
         model: str | None = None,
     ) -> None:
-        self._base_url = (base_url or OLLAMA_BASE_URL).rstrip("/")
-        self._model = model or OLLAMA_MODEL
+        self._config = load_llm_config(
+            base_url=base_url,
+            model=model,
+            timeout=REQUEST_TIMEOUT,
+        )
+        self._base_url = self._config.base_url
+        self._model = self._config.model
 
     async def chat(
         self,
@@ -55,39 +71,30 @@ class AIService:
         # 注入历史对话上下文（最近 6 条）
         if history:
             for msg in history[-6:]:
-                messages.append({"role": msg["role"], "content": msg["content"]})
+                messages.append(
+                    {
+                        "role": msg["role"],
+                        "content": sanitize_text(msg["content"]),
+                    }
+                )
 
-        messages.append({"role": "user", "content": message})
+        messages.append({"role": "user", "content": sanitize_text(message)})
 
-        payload = {
-            "model": self._model,
-            "messages": messages,
-            "stream": False,
-            "options": {
-                "temperature": 0.7,
-                "num_predict": 1024,  # 限制输出长度避免过长
-            },
-        }
+        payload = chat_payload(
+            config=self._config,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=env_int("LLM_MAX_TOKENS", 512),
+        )
 
         try:
-            async with httpx.AsyncClient(timeout=REQUEST_TIMEOUT) as client:
-                response = await client.post(
-                    f"{self._base_url}/v1/chat/completions",
-                    json=payload,
-                    headers={"Content-Type": "application/json"},
-                )
-                response.raise_for_status()
-                data = response.json()
+            data = await apost_chat_completion(self._config, payload)
 
-            return (
-                data.get("choices", [{}])[0]
-                .get("message", {})
-                .get("content", "")
-                .strip()
-                or "抱歉，我暂时没有有效的回复。请换个方式提问。"
-            )
+            return first_choice_text(data) or "抱歉，我暂时没有有效的回复。请换个方式提问。"
 
         except httpx.ConnectError:
+            if self._config.provider != "ollama":
+                return "⚠️ 无法连接到 AI 服务。请检查 LLM_BASE_URL、网络代理和云端 API 可用性。"
             return (
                 "⚠️ 无法连接到 AI 服务（Ollama）。请确认 WSL 中 Ollama 服务正在运行：\n"
                 "```bash\nollama serve\n```\n"
@@ -99,9 +106,11 @@ class AIService:
             return "⚠️ AI 响应超时。DeepSeek R1 是推理模型，首次响应可能较慢。请缩短问题后重试，或使用「智能对话研判」功能。"
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
-            if status == 404:
+            if status == 404 and self._config.provider == "ollama":
                 return f"⚠️ 模型 '{self._model}' 未找到。请在终端执行：`ollama pull {self._model}`"
-            return f"⚠️ AI 服务返回错误 (HTTP {status})。请联系管理员检查 Ollama 配置。"
+            if status in {401, 403}:
+                return "⚠️ AI 服务鉴权失败。请检查 LLM_API_KEY / DASHSCOPE_API_KEY 是否正确。"
+            return f"⚠️ AI 服务返回错误 (HTTP {status})。请检查 LLM_BASE_URL、LLM_MODEL 和网络配置。"
         except Exception as exc:
             return f"⚠️ AI 服务异常：{exc}。请稍后重试或使用其他功能。"
 
