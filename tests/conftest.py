@@ -11,6 +11,11 @@ import tempfile
 _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp_db.close()
 os.environ["DB_PATH"] = _tmp_db.name
+os.environ["CHAT_LLM_ENABLED"] = "0"
+os.environ["RAG_LLM_ENABLED"] = "0"
+os.environ["RAG_RETRIEVAL_ENABLED"] = "0"
+os.environ["CHAT_FLOW_ENGINE"] = "classic"
+os.environ["REQUIRE_AUTH"] = "0"
 
 import pytest  # noqa: E402
 
@@ -29,7 +34,7 @@ def _reset_db():
     """Re-initialise an empty database before every test so tests are isolated."""
     from app.main import storage
 
-    for table in ("users", "user_state", "reports"):
+    for table in ("users", "user_state", "reports", "scenario_progress", "chat_messages"):
         with storage._connect() as conn:
             conn.execute(f"DELETE FROM {table}")
             conn.commit()

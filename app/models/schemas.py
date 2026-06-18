@@ -34,12 +34,43 @@ class ChatResponse(BaseModel):
     latency_ms: float
     matched_rules: list[dict[str, Any]] = Field(default_factory=list)
     risk_breakdown: dict[str, Any] = Field(default_factory=dict)
+    ai_risk_assessment: dict[str, Any] = Field(default_factory=dict)
+    risk_decision: str = ""
+    risk_dimensions: dict[str, Any] = Field(default_factory=dict)
+    current_danger_level: str = "low"
+    scam_likelihood_level: str = "low"
+    residual_risk_level: str = "low"
     next_actions: list[str] = Field(default_factory=list)
     session_stage: str = "collecting"
     known_facts: dict[str, bool] = Field(default_factory=dict)
     pending_questions: list[str] = Field(default_factory=list)
     conversation_summary: str = ""
     turn_count: int = 0
+    retrieved_knowledge: list[dict[str, Any]] = Field(default_factory=list)
+    ruleset_versions: dict[str, str] = Field(default_factory=dict)
+
+
+class ChatResetRequest(BaseModel):
+    user_id: int = Field(ge=1)
+
+
+class ChatHistoryItem(BaseModel):
+    id: int
+    user_id: int
+    user_message: str
+    assistant_reply: str
+    risk_level: Literal["low", "medium", "high", "critical"]
+    risk_score: int
+    intent: str
+    matched_scams: list[str] = Field(default_factory=list)
+    session_stage: str
+    created_at: str
+
+
+class ChatHistoryResponse(BaseModel):
+    user_id: int
+    total: int
+    items: list[ChatHistoryItem]
 
 
 class ReportRequest(BaseModel):
@@ -66,6 +97,8 @@ class ReportResponse(BaseModel):
     matched_rules: list[dict[str, Any]] = Field(default_factory=list)
     risk_breakdown: dict[str, Any] = Field(default_factory=dict)
     next_actions: list[str] = Field(default_factory=list)
+    status: Literal["pending", "reviewed", "closed"] = "pending"
+    ruleset_versions: dict[str, str] = Field(default_factory=dict)
 
 
 class ReportHistoryItem(BaseModel):
@@ -74,6 +107,10 @@ class ReportHistoryItem(BaseModel):
     score: int
     verdict: Literal["safe", "suspicious", "high_risk"]
     matched_keywords: list[str]
+    url_host: str | None = None
+    content_summary: str | None = None
+    reasons: list[str] = Field(default_factory=list)
+    status: Literal["pending", "reviewed", "closed"] = "pending"
     created_at: str
 
 
@@ -81,6 +118,10 @@ class ReportHistoryResponse(BaseModel):
     user_id: int
     total: int
     items: list[ReportHistoryItem]
+
+
+class ReportStatusUpdate(BaseModel):
+    status: Literal["pending", "reviewed", "closed"]
 
 
 class ScamEntryCreate(BaseModel):
@@ -93,6 +134,36 @@ class ScamEntryCreate(BaseModel):
     typical_case: str = Field(min_length=5, max_length=300)
     prevention: list[str] = Field(min_length=1)
     legal_refs: list[str] = Field(min_length=1)
+    sources: list[dict[str, str]] = Field(default_factory=list)
+
+
+class RuleUpdateRequest(BaseModel):
+    enabled: bool | None = None
+    weight: int | None = Field(default=None, ge=0, le=100)
+    change_note: str = Field(min_length=2, max_length=200)
+
+
+class TextRuleCreateRequest(BaseModel):
+    name: str = Field(pattern=r"^[a-z][a-z0-9_]{2,63}$")
+    triggers: list[str] = Field(min_length=1, max_length=50)
+    weight: int = Field(ge=0, le=100)
+    reason: str = Field(min_length=2, max_length=120)
+    rationale: str = Field(min_length=2, max_length=300)
+    version: str = Field(default="1.0", min_length=1, max_length=24)
+    enabled: bool = True
+    change_note: str = Field(min_length=2, max_length=200)
+
+    @model_validator(mode="after")
+    def normalize_triggers(self) -> "TextRuleCreateRequest":
+        cleaned = list(dict.fromkeys(item.strip() for item in self.triggers if item.strip()))
+        if not cleaned:
+            raise ValueError("至少需要一个有效触发词")
+        self.triggers = cleaned
+        return self
+
+
+class RuleRollbackRequest(BaseModel):
+    change_note: str = Field(min_length=2, max_length=200)
 
 
 class ScenarioSummary(BaseModel):
@@ -102,6 +173,8 @@ class ScenarioSummary(BaseModel):
     mode: str = "quiz"
     story: str | None = None
     objectives: list[str] = Field(default_factory=list)
+    max_score: int = Field(ge=0)
+    completion_bonus: int = Field(ge=0)
 
 
 class ScenarioStartRequest(BaseModel):
@@ -121,6 +194,11 @@ class ScenarioStartResponse(BaseModel):
     characters: list[dict[str, Any]] = Field(default_factory=list)
     clues: list[dict[str, Any]] = Field(default_factory=list)
     objectives: list[str] = Field(default_factory=list)
+    total_steps: int = Field(ge=1)
+    max_score: int = Field(ge=0)
+    previous_best: int = Field(ge=0)
+    attempts: int = Field(ge=0)
+    completed: bool = False
 
 
 class ScenarioAnswerRequest(BaseModel):
@@ -136,10 +214,32 @@ class ScenarioAnswerResponse(BaseModel):
     points_gained: int
     total_points: int
     badges: list[str]
+    new_badges: list[str] = Field(default_factory=list)
     next_prompt: str | None
     next_options: list[str]
     case_summary: str | None = None
     debrief: list[str] = Field(default_factory=list)
+    total_steps: int = Field(ge=1)
+    run_score: int = Field(ge=0)
+    max_score: int = Field(ge=0)
+    score_percent: int = Field(ge=0, le=100)
+    best_score: int = Field(ge=0)
+    first_clear: bool = False
+    score_improvement: int = Field(ge=0)
+    attempts: int = Field(ge=0)
+    completions: int = Field(ge=0)
+
+
+class ScenarioProgressItem(BaseModel):
+    scenario_id: str
+    attempts: int = Field(ge=0)
+    completions: int = Field(ge=0)
+    best_score: int = Field(ge=0)
+    max_score: int = Field(ge=0)
+    best_percent: int = Field(ge=0, le=100)
+    points_earned: int = Field(ge=0)
+    first_completed_at: str | None = None
+    last_completed_at: str | None = None
 
 
 class UserProgressResponse(BaseModel):
@@ -149,6 +249,8 @@ class UserProgressResponse(BaseModel):
     badges: list[str]
     reports_submitted: int
     scenarios_completed: int
+    high_risk_blocks: int
+    scenario_progress: list[ScenarioProgressItem] = Field(default_factory=list)
 
 
 # ── 认证相关 ──

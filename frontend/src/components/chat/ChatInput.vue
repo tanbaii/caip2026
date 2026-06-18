@@ -5,6 +5,7 @@
         v-model="text"
         rows="3"
         :disabled="loading"
+        @keydown="handleKeydown"
         class="block w-full resize-none rounded-2xl border-0 bg-slate-50/70 px-4 py-3 text-sm font-semibold leading-7 text-slate-700 placeholder:text-slate-400 disabled:opacity-60 sm:bg-transparent"
         placeholder="输入可疑聊天、链接、转账要求或对方话术，AI 将进行风险研判..."
       />
@@ -43,6 +44,15 @@ function submit() {
 
   emit('send', value)
   text.value = ''
+}
+
+function handleKeydown(event) {
+  if (event.key !== 'Enter' || event.shiftKey || event.isComposing) {
+    return
+  }
+
+  event.preventDefault()
+  submit()
 }
 
 function setText(value) {

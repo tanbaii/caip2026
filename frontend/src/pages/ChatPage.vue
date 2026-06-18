@@ -1,5 +1,5 @@
 <template>
-  <div class="page-shell flex flex-col gap-6 xl:grid xl:grid-cols-[minmax(0,1fr)_400px] xl:items-start">
+  <div class="page-shell chat-workbench mx-auto flex min-h-0 max-w-[1480px] flex-col gap-4 xl:grid xl:grid-cols-[minmax(0,1fr)_360px] xl:items-start">
     <ChatPanel
       :messages="messages"
       :loading="loading"

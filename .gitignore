@@ -28,10 +28,14 @@ frontend/dist/
 # Environment & secrets
 .env
 .env.*
+!.env.example
 
 # Database (runtime data)
 app/data/anti_fraud.db
 app/data/anti_fraud.db.backup-*
+
+# Local model weights
+model/
 
 # Claude local workspace
 .claude/

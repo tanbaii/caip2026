@@ -1,6 +1,6 @@
 <template>
-  <section class="glass-card flex min-h-[calc(100vh-7rem)] min-w-0 flex-1 flex-col overflow-hidden xl:min-h-[calc(100vh-4rem)]">
-    <header class="flex flex-col gap-4 border-b border-slate-200/80 bg-white/95 px-5 py-5 backdrop-blur sm:flex-row sm:items-center sm:justify-between md:px-7">
+  <section class="glass-card flex min-w-0 flex-1 flex-col overflow-hidden">
+    <header class="flex shrink-0 flex-col gap-4 border-b border-slate-200/80 bg-white/95 px-5 py-5 backdrop-blur sm:flex-row sm:items-center sm:justify-between md:px-7">
       <div class="min-w-0">
         <p class="section-kicker">AI Shield Dialogue</p>
         <div class="mt-2 flex flex-wrap items-center gap-3">
@@ -15,7 +15,7 @@
       </button>
     </header>
 
-    <div class="min-h-0 flex-1 space-y-6 overflow-y-auto bg-slate-50/70 p-4 sm:p-6 md:p-7">
+    <div ref="messagesEl" class="max-h-[clamp(22rem,52vh,36rem)] space-y-6 overflow-y-auto bg-slate-50/70 p-4 sm:p-5 md:p-6">
       <MessageBubble v-for="message in messages" :key="message.id" :message="message" />
       <div v-if="loading" class="flex gap-4">
         <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-200">
@@ -34,7 +34,7 @@
       </div>
     </div>
 
-    <footer class="space-y-4 border-t border-slate-200/80 bg-white/95 p-4 backdrop-blur sm:p-5 md:p-6">
+    <footer class="shrink-0 space-y-4 border-t border-slate-200/80 bg-white/95 p-4 backdrop-blur sm:p-5 md:p-6">
       <QuickPrompts @select="handlePromptSelect" />
       <ChatInput ref="inputRef" :loading="loading" @send="$emit('send', $event)" />
     </footer>
@@ -42,14 +42,14 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { nextTick, ref, watch } from 'vue'
 import { Bot, RotateCcw } from 'lucide-vue-next'
 import ChatInput from './ChatInput.vue'
 import MessageBubble from './MessageBubble.vue'
 import QuickPrompts from './QuickPrompts.vue'
 import StatusBadge from '../common/StatusBadge.vue'
 
-defineProps({
+const props = defineProps({
   messages: {
     type: Array,
     required: true,
@@ -63,6 +63,19 @@ defineProps({
 defineEmits(['send', 'reset'])
 
 const inputRef = ref(null)
+const messagesEl = ref(null)
+
+watch(
+  () => [props.messages.length, props.loading],
+  async () => {
+    await nextTick()
+    const el = messagesEl.value
+    if (el) {
+      el.scrollTop = el.scrollHeight
+    }
+  },
+  { flush: 'post' },
+)
 
 function handlePromptSelect(prompt) {
   inputRef.value?.setText(prompt)

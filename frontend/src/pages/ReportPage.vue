@@ -33,6 +33,12 @@
             <p class="text-xs font-black uppercase tracking-widest text-slate-400">风险分</p>
             <p class="mt-1 text-2xl font-black text-slate-900">{{ item.score ?? '-' }}</p>
           </div>
+          <p v-if="item.url_host" class="mt-3 break-all text-xs font-bold text-slate-500">域名：{{ item.url_host }}</p>
+          <p v-if="item.content_summary" class="mt-2 line-clamp-2 text-xs font-semibold leading-5 text-slate-500">{{ item.content_summary }}</p>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <StatusBadge tone="muted">{{ statusLabel(item.status) }}</StatusBadge>
+            <StatusBadge v-for="keyword in list(item.matched_keywords).slice(0, 3)" :key="keyword" tone="warning">{{ keyword }}</StatusBadge>
+          </div>
         </div>
       </div>
     </BaseCard>
@@ -57,6 +63,18 @@ const result = ref(null)
 const history = ref([])
 const historyLoading = ref(false)
 const historyError = ref('')
+
+function list(value) {
+  return Array.isArray(value) ? value : []
+}
+
+function statusLabel(status) {
+  return {
+    pending: '待复核',
+    reviewed: '已复核',
+    closed: '已关闭',
+  }[status] || '待复核'
+}
 
 async function handleSubmit(payload) {
   if (!currentUser.value?.user_id) {

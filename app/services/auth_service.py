@@ -5,6 +5,7 @@ import hmac
 import time
 import base64
 import json
+import secrets
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -23,21 +24,44 @@ class AuthService:
 
     @staticmethod
     def hash_password(plain_password: str) -> str:
-        """使用 SHA-256 + HMAC 生成密码哈希（兼容性优先，无需额外依赖）。"""
-        salt = base64.b64encode(hashlib.sha256(plain_password.encode("utf-8")).digest()).decode()[:16]
-        key = hashlib.sha256((plain_password + salt).encode("utf-8")).hexdigest()
-        return f"sha256${salt}${key}"
+        """Use PBKDF2-HMAC-SHA256 with a random per-user salt."""
+        iterations = 210_000
+        salt = secrets.token_bytes(16)
+        derived = hashlib.pbkdf2_hmac(
+            "sha256",
+            plain_password.encode("utf-8"),
+            salt,
+            iterations,
+        )
+        return "pbkdf2_sha256${}${}${}".format(
+            iterations,
+            base64.urlsafe_b64encode(salt).decode("ascii"),
+            base64.urlsafe_b64encode(derived).decode("ascii"),
+        )
 
     @staticmethod
     def verify_password(plain_password: str, stored_hash: str) -> bool:
         if not stored_hash or "$" not in stored_hash:
             return False
         try:
-            algorithm, salt, _ = stored_hash.split("$", 2)
-            if algorithm != "sha256":
-                return False
-            expected = hashlib.sha256((plain_password + salt).encode("utf-8")).hexdigest()
-            return hmac.compare_digest(expected, stored_hash.rsplit("$", 1)[-1])
+            parts = stored_hash.split("$")
+            if parts[0] == "pbkdf2_sha256" and len(parts) == 4:
+                iterations = int(parts[1])
+                salt = base64.urlsafe_b64decode(parts[2].encode("ascii"))
+                expected = hashlib.pbkdf2_hmac(
+                    "sha256",
+                    plain_password.encode("utf-8"),
+                    salt,
+                    iterations,
+                )
+                received = base64.urlsafe_b64decode(parts[3].encode("ascii"))
+                return hmac.compare_digest(expected, received)
+
+            # Backward compatibility for accounts created by earlier builds.
+            if parts[0] == "sha256" and len(parts) == 3:
+                expected = hashlib.sha256((plain_password + parts[1]).encode("utf-8")).hexdigest()
+                return hmac.compare_digest(expected, parts[2])
+            return False
         except (ValueError, AttributeError):
             return False
 
@@ -144,6 +168,9 @@ class AuthService:
 
         if not self.verify_password(password, user["password_hash"]):
             raise ValueError("用户名或密码错误")
+
+        if str(user["password_hash"]).startswith("sha256$"):
+            self.storage.update_password_hash(user["id"], self.hash_password(password))
 
         token_payload = {
             "sub": str(user["id"]),

@@ -26,6 +26,8 @@ class ScenarioService:
                 "mode": scenario.get("mode", "quiz"),
                 "story": scenario.get("story"),
                 "objectives": scenario.get("objectives", []),
+                "max_score": self._max_score(scenario),
+                "completion_bonus": self.gamification.scenario_completion_bonus,
             }
             for scenario in self._scenarios.values()
         ]
@@ -35,8 +37,13 @@ class ScenarioService:
         if not scenario:
             raise ValueError("未找到对应情景")
 
-        self._sessions[user_id] = {"scenario_id": scenario_id, "step_index": 0}
+        self._sessions[user_id] = {
+            "scenario_id": scenario_id,
+            "step_index": 0,
+            "run_score": 0,
+        }
         first_step = scenario["steps"][0]
+        progress = self.gamification.scenario_progress(user_id, scenario_id)
 
         return {
             "scenario_id": scenario_id,
@@ -50,6 +57,11 @@ class ScenarioService:
             "characters": scenario.get("characters", []),
             "clues": scenario.get("clues", []),
             "objectives": scenario.get("objectives", []),
+            "total_steps": len(scenario["steps"]),
+            "max_score": self._max_score(scenario),
+            "previous_best": int(progress["best_score"]) if progress else 0,
+            "attempts": int(progress["attempts"]) if progress else 0,
+            "completed": progress is not None,
         }
 
     def answer(self, user_id: int, option_index: int) -> dict[str, Any]:
@@ -66,26 +78,26 @@ class ScenarioService:
             raise ValueError("选项序号无效")
 
         selected = step["options"][option_index]
-        option_points = int(selected.get("points", 0))
-        reward_result = self.gamification.award(
-            user_id,
-            action="scenario_step",
-            extra_points=option_points,
-        )
+        option_points = max(0, int(selected.get("points", 0)))
+        session["run_score"] = int(session.get("run_score", 0)) + option_points
+        run_score = int(session["run_score"])
+        max_score = self._max_score(scenario)
 
         next_step_index = step_index + 1
         finished = next_step_index >= len(scenario["steps"])
-        completion_bonus = 0
-
         next_prompt = None
         next_options: list[str] = []
 
         if finished:
-            completion_result = self.gamification.award(user_id, action="scenario_complete")
-            completion_bonus = int(completion_result["points_gained"])
-            reward_result = completion_result
+            reward_result = self.gamification.complete_scenario(
+                user_id=user_id,
+                scenario_id=scenario_id,
+                score=run_score,
+                max_score=max_score,
+            )
             self._sessions.pop(user_id, None)
         else:
+            reward_result = self.gamification.profile(user_id)
             session["step_index"] = next_step_index
             next_step = scenario["steps"][next_step_index]
             next_prompt = next_step["prompt"]
@@ -96,11 +108,21 @@ class ScenarioService:
             "step_index": step_index,
             "finished": finished,
             "feedback": selected["feedback"],
-            "points_gained": option_points + completion_bonus,
-            "total_points": int(reward_result["total_points"]),
+            "points_gained": int(reward_result.get("points_gained", 0)),
+            "total_points": int(reward_result.get("total_points", reward_result.get("points", 0))),
             "badges": list(reward_result["badges"]),
+            "new_badges": list(reward_result.get("new_badges", [])),
             "next_prompt": next_prompt,
             "next_options": next_options,
+            "total_steps": len(scenario["steps"]),
+            "run_score": run_score,
+            "max_score": max_score,
+            "score_percent": round(run_score / max_score * 100) if max_score > 0 else 0,
+            "best_score": int(reward_result.get("best_score", 0)),
+            "first_clear": bool(reward_result.get("first_clear", False)),
+            "score_improvement": int(reward_result.get("score_improvement", 0)),
+            "attempts": int(reward_result.get("attempts", 0)),
+            "completions": int(reward_result.get("completions", 0)),
         }
 
         if finished:
@@ -108,3 +130,10 @@ class ScenarioService:
             result["debrief"] = scenario.get("debrief", [])
 
         return result
+
+    @staticmethod
+    def _max_score(scenario: dict[str, Any]) -> int:
+        return sum(
+            max((int(option.get("points", 0)) for option in step.get("options", [])), default=0)
+            for step in scenario.get("steps", [])
+        )

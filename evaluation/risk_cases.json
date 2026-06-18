@@ -1,0 +1,233 @@
+{
+  "meta": {
+    "version": "1.0.0",
+    "description": "反诈规则引擎离线回归评测集，覆盖高发骗局、否定语义、白名单边界与域名仿冒",
+    "risk_threshold": "medium"
+  },
+  "text_cases": [
+    {
+      "id": "text_brushing_transfer",
+      "category": "刷单返利",
+      "input": "客服让我先垫付保证金，完成刷单后返利，我准备转账。",
+      "expected_risky": true,
+      "minimum_level": "medium",
+      "expected_rules": ["transfer_before_service", "transfer_critical"]
+    },
+    {
+      "id": "text_game_off_platform",
+      "category": "游戏交易",
+      "input": "买家要求绕开平台私下交易，还要我先交保证金。",
+      "expected_risky": true,
+      "minimum_level": "medium",
+      "expected_rules": ["off_platform_trade", "transfer_before_service"]
+    },
+    {
+      "id": "text_authority_pressure",
+      "category": "冒充公检法",
+      "input": "对方自称公检法，说我涉嫌洗钱，要求马上转到安全账户。",
+      "expected_risky": true,
+      "minimum_level": "high",
+      "expected_rules": ["authority_pressure", "transfer_critical"]
+    },
+    {
+      "id": "text_fake_investment",
+      "category": "虚假投资",
+      "input": "老师说有内幕消息，用AI量化带单稳赚高收益。",
+      "expected_risky": true,
+      "minimum_level": "medium",
+      "expected_rules": ["high_return", "ai_investment_scam"]
+    },
+    {
+      "id": "text_campus_loan",
+      "category": "校园贷",
+      "input": "学生专享校园贷需要先交手续费刷流水。",
+      "expected_risky": true,
+      "minimum_level": "medium",
+      "expected_rules": ["campus_loan", "transfer_before_service"]
+    },
+    {
+      "id": "text_scholarship_fee",
+      "category": "助学金诈骗",
+      "input": "教育局通知助学金补录，要先交认证费并提供验证码。",
+      "expected_risky": true,
+      "minimum_level": "high",
+      "expected_rules": ["scholarship_fraud", "account_takeover"]
+    },
+    {
+      "id": "text_airline_refund",
+      "category": "机票退改签",
+      "input": "航司客服说航班取消可双倍赔付，让我点改签链接并提供验证码。",
+      "expected_risky": true,
+      "minimum_level": "high",
+      "expected_rules": ["airline_ticket_refund", "fake_refund_or_compensation", "account_takeover"]
+    },
+    {
+      "id": "text_account_takeover",
+      "category": "账户接管",
+      "input": "对方让我打开屏幕共享，把短信验证码发给他。",
+      "expected_risky": true,
+      "minimum_level": "medium",
+      "expected_rules": ["account_takeover"]
+    },
+    {
+      "id": "text_deepfake",
+      "category": "AI深度伪造",
+      "input": "有人用AI换脸和克隆声音冒充我的同学急借钱。",
+      "expected_risky": true,
+      "minimum_level": "medium",
+      "expected_rules": ["ai_deepfake", "acquaintance_impersonation"]
+    },
+    {
+      "id": "text_reassurance_transfer",
+      "category": "消除戒心话术",
+      "input": "对方说这是正规平台绝对安全，让我立刻转保证金。",
+      "expected_risky": true,
+      "minimum_level": "high",
+      "expected_rules": ["trust_reassurance", "transfer_before_service", "transfer_critical"]
+    },
+    {
+      "id": "text_safe_no_transfer",
+      "category": "否定语义",
+      "input": "对方没有要求转账，也没有索要验证码。",
+      "expected_risky": false,
+      "maximum_level": "low",
+      "forbidden_rules": ["transfer_critical", "account_takeover"]
+    },
+    {
+      "id": "text_safe_warning_code",
+      "category": "安全提醒",
+      "input": "不要提供验证码，不要开启屏幕共享。",
+      "expected_risky": false,
+      "maximum_level": "low",
+      "forbidden_rules": ["account_takeover"]
+    },
+    {
+      "id": "text_safe_authority_warning",
+      "category": "安全提醒",
+      "input": "公检法不会要求你转账到安全账户。",
+      "expected_risky": false,
+      "maximum_level": "low",
+      "forbidden_rules": ["authority_pressure", "transfer_critical"]
+    },
+    {
+      "id": "text_safe_refund_channel",
+      "category": "正常业务",
+      "input": "正常退款请在购物平台官方订单页面发起。",
+      "expected_risky": false,
+      "maximum_level": "low"
+    },
+    {
+      "id": "text_safe_daily_chat",
+      "category": "普通咨询",
+      "input": "今天下午学校图书馆几点关门？",
+      "expected_risky": false,
+      "maximum_level": "low"
+    },
+    {
+      "id": "text_safe_contrast",
+      "category": "转折语义",
+      "input": "他说不需要验证码，但是让我马上转账。",
+      "expected_risky": true,
+      "minimum_level": "medium",
+      "expected_rules": ["transfer_critical"],
+      "forbidden_rules": ["account_takeover"]
+    }
+  ],
+  "url_cases": [
+    {
+      "id": "url_official_gov",
+      "category": "官方白名单",
+      "input": "https://www.gov.cn/",
+      "expected_risky": false,
+      "maximum_level": "low",
+      "expected_rules": ["domain_whitelist"]
+    },
+    {
+      "id": "url_official_edu_subdomain",
+      "category": "官方白名单",
+      "input": "https://notice.example.edu.cn/help",
+      "expected_risky": false,
+      "maximum_level": "low",
+      "expected_rules": ["domain_whitelist"]
+    },
+    {
+      "id": "url_whitelist_suffix_bypass",
+      "category": "白名单边界",
+      "input": "http://evilgov.cn/login",
+      "expected_risky": true,
+      "minimum_level": "medium",
+      "forbidden_rules": ["domain_whitelist"]
+    },
+    {
+      "id": "url_userinfo_confusion",
+      "category": "URL用户信息伪装",
+      "input": "https://gov.cn@secure-bank-login.top/verify",
+      "expected_risky": true,
+      "minimum_level": "high",
+      "expected_rules": ["at_symbol", "risky_tld", "keyword_impersonation"]
+    },
+    {
+      "id": "url_subdomain_disguise",
+      "category": "子域名仿冒",
+      "input": "https://taobao.com.evil.top/login",
+      "expected_risky": true,
+      "minimum_level": "high",
+      "expected_rules": ["subdomain_disguise", "domain_impersonation"]
+    },
+    {
+      "id": "url_airline_typo",
+      "category": "航司域名仿冒",
+      "input": "http://aircnina.com/refund",
+      "expected_risky": true,
+      "minimum_level": "medium",
+      "expected_rules": ["typosquatting"]
+    },
+    {
+      "id": "url_brand_digit_typo",
+      "category": "品牌域名仿冒",
+      "input": "https://ta0bao.com/login",
+      "expected_risky": true,
+      "minimum_level": "medium",
+      "expected_rules": ["typosquatting"]
+    },
+    {
+      "id": "url_punycode",
+      "category": "国际化域名仿冒",
+      "input": "http://xn--paypa-4ve.top/login",
+      "expected_risky": true,
+      "minimum_level": "high",
+      "expected_rules": ["punycode", "risky_tld"]
+    },
+    {
+      "id": "url_ip_direct",
+      "category": "IP直连",
+      "input": "http://203.0.113.8/account",
+      "expected_risky": true,
+      "minimum_level": "medium",
+      "expected_rules": ["ip_direct", "plain_http"]
+    },
+    {
+      "id": "url_shortener",
+      "category": "短链接",
+      "input": "http://bit.ly/refund-bonus",
+      "expected_risky": true,
+      "minimum_level": "medium",
+      "expected_rules": ["shortener", "plain_http"]
+    },
+    {
+      "id": "url_keyword_impersonation",
+      "category": "诱导关键词域名",
+      "input": "https://official-secure-bank-login.xyz/verify",
+      "expected_risky": true,
+      "minimum_level": "medium",
+      "expected_rules": ["keyword_impersonation", "risky_tld"]
+    },
+    {
+      "id": "url_safe_https",
+      "category": "普通HTTPS链接",
+      "input": "https://example.com/news",
+      "expected_risky": false,
+      "maximum_level": "low"
+    }
+  ]
+}

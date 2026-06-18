@@ -12,24 +12,31 @@
 | # | 方法 | 路径 | 后端函数 (main.py) | 前端调用 | 鉴权 |
 |---|------|------|---------------------|----------|------|
 | 1 | GET | `/health` | `health()` :92 | app.js:676 | 无 |
-| 2 | POST | `/chat` | `chat()` :97 | app.js:702 | 无 |
-| 3 | POST | `/report` | `report()` :102 | app.js:744 | 无 |
+| 2 | POST | `/chat` | `chat()` | Vue chat API | Bearer Token |
+| 3 | POST | `/chat/reset` | `reset_chat()` | Vue chat API | Bearer Token |
+| 4 | POST | `/report` | `report()` | Vue report API | Bearer Token |
 | 4 | GET | `/knowledge/scams` | `list_scams()` :112 | app.js:630 | 无 |
 | 5 | GET | `/knowledge/laws` | `list_laws()` :117 | app.js:631 | 无 |
 | 6 | POST | `/knowledge/scams` | `add_scam()` :122 | 无 (管理员) | x-admin-token |
 | 7 | GET | `/scenarios` | `list_scenarios()` :138 | app.js:775 | 无 |
-| 8 | POST | `/scenarios/start` | `start_scenario()` :143 | app.js:844 | 无 |
-| 9 | POST | `/scenarios/answer` | `answer_scenario()` :152 | app.js:881 | 无 |
-| 10 | GET | `/users/{user_id}/progress` | `get_progress()` :161 | app.js:898 | 无 |
-| 11 | GET | `/users/{user_id}/reports` | `get_user_reports()` :179 | app.js:938 | 无 |
+| 8 | POST | `/scenarios/start` | `start_scenario()` | Vue scenario API | Bearer Token |
+| 9 | POST | `/scenarios/answer` | `answer_scenario()` | Vue scenario API | Bearer Token |
+| 10 | GET | `/users/{user_id}/progress` | `get_progress()` :161 | Vue profile/game API | Bearer Token |
+| 11 | GET | `/users/{user_id}/reports` | `get_user_reports()` | Vue report API | Bearer Token |
+| 12 | PATCH | `/reports/{report_id}/status` | `update_report_status()` | 管理端 | x-admin-token |
 | 12 | POST | `/auth/register` | `register()` :209 | app.js:297 | 无 |
 | 13 | POST | `/auth/login` | `login()` :223 | app.js:248 | 无 |
 | 14 | GET | `/auth/me` | `get_me()` :232 | app.js:127 | Bearer Token |
 | 15 | GET | `/leaderboard` | `leaderboard()` :245 | app.js:481 | 无 |
 | 16 | POST | `/ai/chat` | `ai_chat()` :253 | app.js:379 | 无 |
 | 17 | GET | `/` | `home()` :87 | — (HTML 入口) | 无 |
+| 18 | GET | `/admin/rules/overview` | `rule_overview()` | 规则管理页 | x-admin-token |
+| 19 | GET | `/admin/rules/history` | `rule_history()` | 规则管理页 | x-admin-token |
+| 20 | PATCH | `/admin/rules/{ruleset}/{rule_name}` | `update_rule()` | 规则管理页 | x-admin-token |
+| 21 | POST | `/admin/rules/text` | `create_text_rule()` | 规则管理页 | x-admin-token |
+| 22 | POST | `/admin/rules/rollback/{version_id}` | `rollback_rules()` | 规则管理页 | x-admin-token |
 
-共 17 个端点 (9 GET / 8 POST)。
+共 22 个端点。
 
 ---
 
@@ -173,6 +180,9 @@
 | total_points | int | 总积分 |
 | badges | list[str] | 勋章列表 |
 | latency_ms | float | 处理延迟 (ms) |
+| matched_rules | list[object] | 命中规则，含证据、权重、规则版本、规则集版本与判定依据 |
+| risk_breakdown | object | 文本、URL、知识库、画像、情绪、多轮对话等分数拆解 |
+| ruleset_versions | object | 实际加载的文本规则集与 URL 规则集版本 |
 
 ---
 
@@ -249,6 +259,9 @@
 | recommendations | list[str] | 建议 |
 | matched_keywords | list[str] | 命中关键词 |
 | url_flags | list[str] | URL 风险标记 |
+| matched_rules | list[object] | 命中规则及 `rule_version`、`ruleset_version`、`rationale` |
+| risk_breakdown | object | URL 分、文本分和总分 |
+| ruleset_versions | object | 实际加载的文本规则集与 URL 规则集版本 |
 
 判定阈值:
 - `score >= 55` → `high_risk`
@@ -272,6 +285,8 @@
 | id | str | 关卡 ID (如 C001) |
 | title | str | 关卡标题 |
 | scam_type | str | 骗局类型 |
+| max_score | int | 关卡最高答题分 |
+| completion_bonus | int | 首次通关固定奖励 |
 
 ---
 
@@ -303,6 +318,10 @@
 | step_index | int | 当前步骤 |
 | prompt | str | 题目文本 |
 | options | list[str] | 选项列表 |
+| max_score | int | 关卡最高答题分 |
+| previous_best | int | 用户历史最佳成绩 |
+| attempts | int | 历史挑战次数 |
+| completed | bool | 是否已经通关 |
 
 错误: 404 关卡不存在
 
@@ -338,8 +357,15 @@
 | points_gained | int | 本次积分 |
 | total_points | int | 总积分 |
 | badges | list[str] | 勋章列表 |
+| new_badges | list[str] | 本次新解锁勋章 |
 | next_prompt | str / null | 下一题文本 (finished=false 时) |
 | next_options | list[str] | 下一题选项 |
+| run_score / max_score | int | 本局成绩与关卡满分 |
+| score_percent | int | 本局得分百分比 |
+| best_score | int | 结算后的历史最佳成绩 |
+| first_clear | bool | 是否首次通关 |
+| score_improvement | int | 相比历史最佳提升的分数 |
+| attempts / completions | int | 挑战与完成次数 |
 
 错误: 400 参数错误 / 无进行中的关卡
 
@@ -363,6 +389,7 @@
 | badges | list[str] | 勋章列表 |
 | reports_submitted | int | 举报次数 |
 | scenarios_completed | int | 完成关卡数 |
+| scenario_progress | list | 每关挑战次数、最佳成绩、累计奖励和完成时间 |
 
 ---
 
@@ -490,6 +517,53 @@ GET /users/1/reports?limit=10&start_at=2026-04-01T00:00:00&end_at=2026-05-01T00:
 
 ---
 
+## 规则管理接口
+
+### GET /admin/rules/overview — 当前规则
+
+返回当前生效修订、文本/URL 规则集版本，以及各规则的启停状态、权重、解释依据和触发词。请求头：`X-Admin-Token`。
+
+### PATCH /admin/rules/{ruleset}/{rule_name} — 在线启停或调权
+
+```json
+{
+  "enabled": false,
+  "weight": 10,
+  "change_note": "调整消除戒心规则"
+}
+```
+
+`enabled` 和 `weight` 至少提供一项。校验通过后立即热加载，无需重启。
+
+### POST /admin/rules/text — 新增文本骗局规则
+
+```json
+{
+  "name": "fake_delivery_compensation",
+  "triggers": ["快递破损", "专属补偿码"],
+  "weight": 24,
+  "reason": "命中快递理赔诱导",
+  "rationale": "冒充快递客服诱导领取赔偿的高发话术",
+  "version": "1.0",
+  "enabled": true,
+  "change_note": "接入快递理赔新骗局"
+}
+```
+
+### GET /admin/rules/history — 版本记录
+
+按时间倒序返回不可变修订记录，包括动作、变更说明、两套规则版本和当前生效标记。
+
+### POST /admin/rules/rollback/{version_id} — 回滚
+
+```json
+{"change_note": "回滚误发布规则"}
+```
+
+回滚不会删除后续历史，而是以目标快照创建一条新的生效修订，保留完整审计链。
+
+---
+
 ## 系统接口
 
 ### GET /health — 健康检查
@@ -525,8 +599,10 @@ GET /users/1/reports?limit=10&start_at=2026-04-01T00:00:00&end_at=2026-05-01T00:
 | knowledge_query | +5 |
 | report_submit | +12 |
 | risk_block | +20 |
-| scenario_step | 按选项 points |
-| scenario_complete | +15 |
+| scenario 首次通关 | 本局答题分 + 15 |
+| scenario 重复挑战 | 仅奖励超过历史最佳成绩的增量 |
+
+关卡积分在完成全部步骤后统一结算；重复获得相同或更低成绩不会增加积分，避免排行榜刷分。
 
 等级: `level = points // 100 + 1`
 
@@ -542,6 +618,6 @@ GET /users/1/reports?limit=10&start_at=2026-04-01T00:00:00&end_at=2026-05-01T00:
 
 ### 前后端一致性
 
-前端调用的 15 个接口, 后端全部有对应实现。后端独有的接口:
-- `POST /knowledge/scams` — 管理员功能, 前端无入口
+前端调用接口均有对应后端实现。规则管理页面已覆盖概览、启停调权、新增规则、历史与回滚接口。后端独有的接口:
+- `POST /knowledge/scams` — 知识库管理员接口
 - `GET /` — HTML 入口, 浏览器直接访问

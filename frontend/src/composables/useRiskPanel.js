@@ -68,6 +68,7 @@ export function useRiskPanel(riskRef) {
       totalPoints: Number(data.total_points) || 0,
       badges: asList(data.badges),
       latencyMs: Number(data.latency_ms) || 0,
+      rulesetVersions: data.ruleset_versions || {},
       meta,
     }
   })

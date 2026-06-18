@@ -111,6 +111,7 @@ echo "TOKEN=${TOKEN:0:20}..."
 ```bash
 curl -s -X POST http://127.0.0.1:8000/chat \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "{
     \"user_id\": $USER_ID,
     \"message\": \"有人让我先垫付刷单，说完成后返利\",
@@ -132,6 +133,7 @@ curl -s -X POST http://127.0.0.1:8000/chat \
 ```bash
 curl -s -X POST http://127.0.0.1:8000/report \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "{
     \"user_id\": $USER_ID,
     \"url\": \"http://xn--secure-bank-5k9f.top/login@notice\",
@@ -155,20 +157,24 @@ curl -s http://127.0.0.1:8000/scenarios
 # 开始 C001
 curl -s -X POST http://127.0.0.1:8000/scenarios/start \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "{\"user_id\": $USER_ID, \"scenario_id\": \"C001\"}"
 
 # 回答第 1 题（option_index 按返回选项序号填写）
 curl -s -X POST http://127.0.0.1:8000/scenarios/answer \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TOKEN" \
   -d "{\"user_id\": $USER_ID, \"option_index\": 1}"
 ```
 
 ### 3.5 查看进度、历史与排行榜
 
 ```bash
-curl -s "http://127.0.0.1:8000/users/$USER_ID/progress"
+curl -s "http://127.0.0.1:8000/users/$USER_ID/progress" \
+  -H "Authorization: Bearer $TOKEN"
 
-curl -s "http://127.0.0.1:8000/users/$USER_ID/reports?limit=10"
+curl -s "http://127.0.0.1:8000/users/$USER_ID/reports?limit=10" \
+  -H "Authorization: Bearer $TOKEN"
 
 curl -s "http://127.0.0.1:8000/leaderboard?top=20"
 ```
@@ -178,6 +184,8 @@ curl -s "http://127.0.0.1:8000/leaderboard?top=20"
 ## 4. 管理员：新增骗局知识
 
 `POST /knowledge/scams` 需要请求头 `x-admin-token`。
+
+管理员还可通过 `PATCH /reports/{report_id}/status` 将举报标记为 `pending`、`reviewed` 或 `closed`。
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/knowledge/scams \
@@ -233,7 +241,30 @@ python scripts/benchmark_api.py \
 
 ---
 
-## 7. 自动化测试现状
+## 7. 演示数据一键初始化
+
+为了保证答辩现场稳定复现，可用脚本生成固定演示用户、举报历史、闯关进度、积分勋章和规则变更审计记录：
+
+```bash
+python scripts/seed_demo_data.py --reset
+```
+
+默认写入 `DB_PATH` 指向的 SQLite，未设置时写入 `app/data/anti_fraud.db`。脚本输出会列出演示账号：
+
+| 用户名 | 密码 | 用途 |
+|--------|------|------|
+| `demo_student` | `Demo@123456` | 学生端完整演示：聊天、举报、闯关、积分、规则命中 |
+| `demo_guardian` | `Demo@123456` | 泛个人用户体验账号 |
+
+初始化后可访问：
+
+- `/profile`：查看积分、等级、勋章与闯关进度；
+- `/report`：查看举报记录与状态；
+- `/admin/rules`：查看“新增快递理赔规则、临时调权、回滚”的规则审计轨迹。
+
+---
+
+## 8. 自动化测试现状
 
 执行：
 
@@ -241,11 +272,51 @@ python scripts/benchmark_api.py \
 pytest -q
 ```
 
-当前仓库实测结果：**71 个通过，0 个失败**
+当前仓库实测结果：**103 个通过，0 个失败**
+
+### 8.1 规则离线评测
+
+仓库内置文本与 URL 风险规则回归集，覆盖刷单返利、游戏交易、冒充公检法、虚假投资、校园贷、助学金、机票退改签、否定语义、白名单边界和域名仿冒。评测会输出准确率、精确率、召回率、F1、误报率、规则断言通过率和 P95 延迟：
+
+```bash
+python scripts/evaluate_rules.py \
+  --iterations 100 \
+  --output RULE_EVALUATION.md \
+  --fail-on-regression
+```
+
+评测数据位于 `evaluation/risk_cases.json`。新增骗局或调整规则时，应同时增加风险正例和安全反例，避免只提高召回而放大误报。
+
+### 8.2 规则管理与热加载
+
+登录后访问 `/admin/rules` 可打开规则控制台。管理接口使用 `ANTI_FRAUD_ADMIN_TOKEN` 对应的 `X-Admin-Token` 鉴权，支持：
+
+- 查看当前文本规则集、URL 规则集版本及生效修订；
+- 在线启停规则、调整 0-100 权重；
+- 新增可配置文本骗局规则并立即进入聊天和举报研判链路；
+- 查看 SQLite 中的不可变变更记录，并将任意历史快照回滚为新的生效修订；
+- 发布前校验规则名称、触发词、权重、URL condition、正则和风险等级阈值。
+
+热加载采用完整运行时快照替换，同一服务进程中的现有 `DialogueService` 与 `ReportService` 无需重建。生产部署建议使用单进程应用实例，或在多实例环境中增加配置发布消息通知。
+
+### 规则与知识库版本
+
+- 文本规则集当前版本为 `2.1.0`，URL 规则集为 `2.2.0`；接口通过 `ruleset_versions` 返回实际加载版本。
+- 每条命中规则返回 `rule_version`、`ruleset_version` 和 `rationale`，前端可展开查看判定依据。
+- 知识库新增助学金/奖学金、机票退改签条目；闯关新增 `C010` 机票退改签场景。
+- 否定语义只在同一分句和有限窗口内生效，例如“没有要求转账”“不要提供验证码”不会被当作风险行为。
+- URL 白名单采用主域名边界匹配，`service.edu.cn` 可命中，`evilgov.cn` 不会冒充 `gov.cn` 进入白名单。
+
+### 游戏化积分规则
+
+- 关卡答题分在本局结束时统一结算，中途退出不会产生积分。
+- 首次通关获得 `15` 分固定奖励，并计入本局有效答题分。
+- 重复挑战只奖励超过历史最佳成绩的增量，相同成绩不重复加分。
+- 系统持久化每关挑战次数、最佳成绩、累计奖励与完成时间，个人中心和闯关页均可查看。
 
 ---
 
-## 8. 目录结构
+## 9. 目录结构
 
 ```text
 anti_fraud_system/
@@ -258,6 +329,7 @@ anti_fraud_system/
       schemas.py
     services/
       *.py
+      rule_management.py
     web/
       index.html
       app.js
@@ -265,8 +337,13 @@ anti_fraud_system/
     main.py
   scripts/
     benchmark_api.py
+    evaluate_rules.py
+    seed_demo_data.py
+  evaluation/
+    risk_cases.json
   tests/
     test_api.py
+    test_rule_evaluation.py
   requirements.txt
   README.md
   USAGE_GUIDE.md
@@ -274,17 +351,19 @@ anti_fraud_system/
 
 ---
 
-## 9. 故障排查
+## 10. 故障排查
 
 - 端口占用：`uvicorn` 启动失败时，改端口 `--port 8001`
 - 依赖安装慢：优先升级 pip，或换镜像源
 - 前端一直显示未登录：清理浏览器 `localStorage` 后重新登录
+- 管理规则提示 401：确认 `ANTI_FRAUD_ADMIN_TOKEN` 与页面输入一致，管理令牌只保存在浏览器会话
 - AI 回复报连接失败：先检查 `ollama serve` 是否在运行
 
 ---
 
-## 10. 安全提示
+## 11. 安全提示
 
 - 默认密钥仅用于开发演示，生产环境必须替换
 - 管理员 token 不要写死在前端
+- `scripts/seed_demo_data.py --reset` 只清理固定演示用户及其业务记录，不清理真实用户
 - 涉及真实资金风险场景时，优先执行止损与报警流程

@@ -39,6 +39,8 @@ def test_chat_high_risk_warning() -> None:
     data = response.json()
     assert data["risk_level"] in {"high", "critical"}
     assert data["risk_score"] >= 40
+    assert "retrieved_knowledge" in data
+    assert isinstance(data["retrieved_knowledge"], list)
 
 
 def test_report_suspicious_url() -> None:
@@ -506,12 +508,12 @@ def test_json_config_drives_scoring() -> None:
 
     from app.services.risk_engine import RiskEngine
 
-    # 读取原配置，把 authority_pressure 权重改为 999
+    # 读取原配置，把 authority_pressure 权重改为合法范围内的 99
     original = Path("app/data/risk_rules.json")
     cfg = json.loads(original.read_text(encoding="utf-8"))
     for rule in cfg["text_rules"]:
         if rule["name"] == "authority_pressure":
-            rule["weight"] = 999
+            rule["weight"] = 99
             break
 
     with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False, encoding="utf-8") as f:
@@ -521,7 +523,7 @@ def test_json_config_drives_scoring() -> None:
     try:
         engine = RiskEngine(risk_rules_path=tmp_path)
         result = engine.evaluate_text("涉及公检法调查", [], "general", None)
-        assert result["score"] >= 999
+        assert result["score"] >= 99
     finally:
         Path(tmp_path).unlink(missing_ok=True)
 
@@ -701,12 +703,11 @@ def test_url_score_to_level_uses_url_config() -> None:
     from app.services.risk_engine import RiskEngine
 
     engine = RiskEngine()
-    # Punycode (20) + @ (20) + risky TLD (12) + HTTP (10) = 62
+    # Punycode (20) + @ (20) + risky TLD (12) + HTTP (10) + keyword_impersonation (15) = 77
     result = engine.evaluate_url("http://xn--secure-bank-5k9f.top/login@notice")
-    assert result["score"] == 62
-    assert result["level"] == "high"
-    # 如果错误地使用 risk_rules 的 critical=70，high=40，结果相同
-    # 但通过 _url_score_to_level 方法存在性验证实现正确性
+    assert result["score"] == 77
+    assert result["level"] == "critical"
+    # 通过 _url_score_to_level 方法存在性验证实现正确性
     assert hasattr(engine, "_url_score_to_level")
 
 
@@ -1171,3 +1172,607 @@ def test_multi_turn_stage_consistent_with_final_risk_level() -> None:
     assert d2["known_facts"].get("has_transfer_request") is True
     assert d2["turn_count"] == 2
 
+
+def test_chat_risk_score_uses_final_breakdown_total() -> None:
+    user_id = 9300
+    r1 = client.post("/chat", json={
+        "user_id": user_id,
+        "message": "有人让我先垫付刷单，说完成后返利",
+        "user_profile": {"role": "student"},
+        "emotion": "anxious",
+    })
+    assert r1.status_code == 200
+    d1 = r1.json()
+
+    r2 = client.post("/chat", json={
+        "user_id": user_id,
+        "message": "我已经下单了咋办",
+        "user_profile": {"role": "student"},
+        "emotion": "anxious",
+    })
+    assert r2.status_code == 200
+    d2 = r2.json()
+
+    assert d1["risk_score"] == d1["risk_breakdown"]["total"]
+    assert d2["risk_score"] == d2["risk_breakdown"]["total"]
+    assert d2["risk_score"] >= d1["risk_score"]
+
+
+def test_chat_new_scam_topic_resets_stale_conversation_facts() -> None:
+    user_id = 9400
+    r1 = client.post("/chat", json={
+        "user_id": user_id,
+        "message": "有人用AI换脸视频冒充我朋友借钱，让我马上转账",
+        "user_profile": {"role": "student"},
+        "emotion": "anxious",
+    })
+    assert r1.status_code == 200
+    d1 = r1.json()
+    assert d1["known_facts"].get("mentions_ai_deepfake") is True
+
+    r2 = client.post("/chat", json={
+        "user_id": user_id,
+        "message": "有人让我先垫付刷单，说完成后返利",
+        "user_profile": {"role": "student"},
+        "emotion": "anxious",
+    })
+    assert r2.status_code == 200
+    d2 = r2.json()
+
+    rule_names = {item.get("rule", "") for item in d2["matched_rules"]}
+    assert "conv_ai_fake_transfer" not in rule_names
+    assert d2["known_facts"].get("mentions_ai_deepfake") is not True
+    assert d2["known_facts"].get("mentions_reward_or_subsidy") is True
+    assert d2["turn_count"] == 1
+
+
+def test_rag_rule_formatter_hides_internal_rule_names() -> None:
+    from app.services.rag_reply_service import _format_rules
+
+    text = _format_rules([
+        {
+            "rule": "conv_ai_fake_transfer",
+            "weight": 22,
+            "reason": "多轮对话确认：AI伪造身份并要求转账",
+        }
+    ])
+
+    assert "conv_ai_fake_transfer" not in text
+    assert "22" not in text
+    assert "AI伪造身份" in text
+
+
+def test_rag_sanitizer_rewrites_report_style_reply() -> None:
+    from app.services.rag_reply_service import _sanitize_reply
+
+    reply = """朋友，你描述的很像刷单返利诈骗。
+【风险等级】medium
+【最终风险分】29
+【命中规则】出现放款或服务前收费特征"""
+
+    cleaned = _sanitize_reply(
+        reply,
+        {
+            "risk_level": "medium",
+            "matched_rules": [
+                {"reason": "出现放款或服务前收费特征"},
+                {"reason": "文本与已知诈骗模型高度相关"},
+            ],
+            "recommendations": [
+                "优先使用官方平台或官方客服渠道",
+                "拒绝任何先付款后服务的要求",
+            ],
+        },
+        "有人让我先垫付刷单，说完成后返利",
+    )
+
+    assert "【风险等级】" not in cleaned
+    assert "【最终风险分】" not in cleaned
+    assert "命中规则" not in cleaned
+    assert "先垫付" in cleaned
+    assert "不要继续" in cleaned or "不要再" in cleaned
+
+
+def test_rag_sanitizer_rewrites_prompt_leak() -> None:
+    from app.services.rag_reply_service import _sanitize_reply
+
+    cleaned = _sanitize_reply(
+        "请重新按【高风险】规则引擎评估。",
+        {
+            "risk_level": "high",
+            "matched_rules": [{"reason": "多轮对话确认：以奖金/补贴为由要求缴费"}],
+            "recommendations": ["保留聊天记录", "联系银行申请止付"],
+        },
+        "我把他拉黑了",
+    )
+
+    assert "请重新按" not in cleaned
+    assert "规则引擎" not in cleaned
+    assert "不要再" in cleaned or "马上停" in cleaned
+
+
+def test_rag_reply_blocks_internal_json_echo() -> None:
+    from app.services.rag_reply_service import _looks_like_internal_echo
+
+    assert _looks_like_internal_echo('{"user_message":"x","risk_engine_result":{}}') is True
+    assert _looks_like_internal_echo("请先停止付款，并通过官方渠道核实。") is False
+
+
+def test_chat_workflow_runner_preserves_chat_contract() -> None:
+    from app.main import gamification_service, intent_recognizer, knowledge_base, risk_engine
+    from app.models.schemas import ChatRequest
+    from app.services.chat_workflow import ChatWorkflowRunner
+    from app.services.dialogue_service import DialogueService
+
+    service = DialogueService(
+        knowledge_base=knowledge_base,
+        intent_recognizer=intent_recognizer,
+        risk_engine=risk_engine,
+        gamification=gamification_service,
+    )
+    runner = ChatWorkflowRunner(service)
+    request = ChatRequest.model_validate({
+        "user_id": 9500,
+        "message": "有人让我先垫付刷单，说完成后返利",
+        "user_profile": {"role": "student"},
+        "emotion": "anxious",
+    })
+
+    data = runner.process_chat(request)
+
+    assert runner.engine in {"langgraph", "sequential"}
+    assert data["risk_score"] == data["risk_breakdown"]["total"]
+    assert data["matched_scams"]
+    assert "retrieved_knowledge" in data
+    assert isinstance(data["reply"], str)
+
+
+def test_chat_reset_clears_server_side_state() -> None:
+    user_id = 9601
+    first = client.post("/chat", json={
+        "user_id": user_id,
+        "message": "有人冒充公安让我转账到安全账户",
+        "user_profile": {"role": "student"},
+    })
+    assert first.status_code == 200
+    assert first.json()["known_facts"].get("mentions_authority") is True
+
+    reset = client.post("/chat/reset", json={"user_id": user_id})
+    assert reset.status_code == 200
+
+    second = client.post("/chat", json={
+        "user_id": user_id,
+        "message": "你好，我想学习反诈知识",
+        "user_profile": {"role": "student"},
+    })
+    assert second.status_code == 200
+    data = second.json()
+    assert data["turn_count"] == 1
+    assert data["known_facts"].get("mentions_authority") is not True
+
+
+def test_protected_routes_bind_token_user(monkeypatch) -> None:
+    import app.main as main_module
+
+    monkeypatch.setattr(main_module, "REQUIRE_AUTH", True)
+    registered = client.post("/auth/register", json={
+        "username": "bound_user",
+        "password": "demo123456",
+        "role": "student",
+    })
+    assert registered.status_code == 200
+    auth = registered.json()
+    headers = {"Authorization": f"Bearer {auth['access_token']}"}
+
+    missing = client.post("/chat", json={"user_id": auth["user_id"], "message": "你好"})
+    assert missing.status_code == 401
+
+    mismatched = client.post(
+        "/chat",
+        headers=headers,
+        json={"user_id": auth["user_id"] + 1, "message": "你好"},
+    )
+    assert mismatched.status_code == 403
+
+    allowed = client.post(
+        "/chat",
+        headers=headers,
+        json={"user_id": auth["user_id"], "message": "你好"},
+    )
+    assert allowed.status_code == 200
+
+
+def test_report_history_stores_only_sanitized_summary() -> None:
+    user_id = 9602
+    response = client.post("/report", json={
+        "user_id": user_id,
+        "url": "http://xn--secure-bank-5k9f.top/login?token=secret",
+        "content": "验证码:123456，手机号13812345678，银行卡6222021234567890，点击领取返利",
+    })
+    assert response.status_code == 200
+    assert response.json()["status"] == "pending"
+
+    history = client.get(f"/users/{user_id}/reports").json()["items"][0]
+    assert history["url_host"] == "xn--secure-bank-5k9f.top"
+    assert "secret" not in (history["url_host"] or "")
+    assert "123456" not in history["content_summary"]
+    assert "13812345678" not in history["content_summary"]
+    assert "6222021234567890" not in history["content_summary"]
+    assert "******" in history["content_summary"]
+    assert history["status"] == "pending"
+    assert isinstance(history["reasons"], list)
+
+
+def test_admin_can_review_report_status() -> None:
+    from app.main import ADMIN_TOKEN
+
+    user_id = 9605
+    created = client.post("/report", json={
+        "user_id": user_id,
+        "content": "有人让我先转保证金再返利",
+    })
+    report_id = created.json()["report_id"]
+
+    denied = client.patch(
+        f"/reports/{report_id}/status",
+        json={"status": "reviewed"},
+    )
+    assert denied.status_code == 401
+
+    updated = client.patch(
+        f"/reports/{report_id}/status",
+        headers={"x-admin-token": ADMIN_TOKEN},
+        json={"status": "reviewed"},
+    )
+    assert updated.status_code == 200
+    assert updated.json()["status"] == "reviewed"
+
+    history = client.get(f"/users/{user_id}/reports").json()["items"]
+    assert history[0]["status"] == "reviewed"
+
+
+def test_progress_includes_high_risk_blocks() -> None:
+    user_id = 9603
+    response = client.post("/chat", json={
+        "user_id": user_id,
+        "message": "公检法让我马上转账到安全账户并提供验证码",
+        "user_profile": {"role": "student"},
+    })
+    assert response.status_code == 200
+
+    progress = client.get(f"/users/{user_id}/progress")
+    assert progress.status_code == 200
+    assert progress.json()["high_risk_blocks"] >= 1
+
+
+def test_scenario_responses_include_total_steps() -> None:
+    start = client.post(
+        "/scenarios/start",
+        json={"user_id": 9604, "scenario_id": "C008"},
+    )
+    assert start.status_code == 200
+    assert start.json()["total_steps"] >= 3
+
+    answer = client.post(
+        "/scenarios/answer",
+        json={"user_id": 9604, "option_index": 1},
+    )
+    assert answer.status_code == 200
+    assert answer.json()["total_steps"] == start.json()["total_steps"]
+
+
+def _finish_c001(user_id: int, choices: tuple[int, int]) -> dict:
+    started = client.post(
+        "/scenarios/start",
+        json={"user_id": user_id, "scenario_id": "C001"},
+    )
+    assert started.status_code == 200
+    client.post("/scenarios/answer", json={"user_id": user_id, "option_index": choices[0]})
+    finished = client.post(
+        "/scenarios/answer",
+        json={"user_id": user_id, "option_index": choices[1]},
+    )
+    assert finished.status_code == 200
+    return finished.json()
+
+
+def test_scenario_replay_cannot_farm_same_score() -> None:
+    user_id = 9701
+    first = _finish_c001(user_id, (1, 1))
+    second = _finish_c001(user_id, (1, 1))
+
+    assert first["first_clear"] is True
+    assert first["run_score"] == first["max_score"] == 25
+    assert first["points_gained"] == 40
+    assert second["first_clear"] is False
+    assert second["points_gained"] == 0
+    assert second["score_improvement"] == 0
+    assert second["attempts"] == 2
+    assert second["total_points"] == first["total_points"]
+
+    progress = client.get(f"/users/{user_id}/progress").json()
+    assert progress["scenarios_completed"] == 1
+    assert progress["scenario_progress"][0]["best_percent"] == 100
+    assert progress["scenario_progress"][0]["attempts"] == 2
+
+
+def test_scenario_replay_rewards_only_best_score_improvement() -> None:
+    user_id = 9702
+    first = _finish_c001(user_id, (0, 0))
+    improved = _finish_c001(user_id, (1, 1))
+    repeated = _finish_c001(user_id, (1, 1))
+
+    assert first["points_gained"] == 15
+    assert improved["first_clear"] is False
+    assert improved["score_improvement"] == 25
+    assert improved["points_gained"] == 25
+    assert improved["best_score"] == 25
+    assert repeated["points_gained"] == 0
+
+    progress = client.get(f"/users/{user_id}/progress").json()
+    record = progress["scenario_progress"][0]
+    assert record["scenario_id"] == "C001"
+    assert record["attempts"] == 3
+    assert record["points_earned"] == 40
+
+
+def test_new_password_hash_uses_random_salt() -> None:
+    from app.main import storage
+
+    first = client.post("/auth/register", json={
+        "username": "pbkdf2_user_one",
+        "password": "same-password",
+    }).json()
+    second = client.post("/auth/register", json={
+        "username": "pbkdf2_user_two",
+        "password": "same-password",
+    }).json()
+
+    first_hash = storage.get_user_by_id(first["user_id"])
+    second_hash = storage.get_user_by_id(second["user_id"])
+    assert first_hash is not None and second_hash is not None
+
+    stored_first = storage.get_user_by_username("pbkdf2_user_one")["password_hash"]
+    stored_second = storage.get_user_by_username("pbkdf2_user_two")["password_hash"]
+    assert stored_first.startswith("pbkdf2_sha256$")
+    assert stored_second.startswith("pbkdf2_sha256$")
+    assert stored_first != stored_second
+
+
+def test_p0_knowledge_covers_scholarship_and_airline_refund() -> None:
+    scams = client.get("/knowledge/scams").json()
+    by_type = {item["type"]: item for item in scams}
+
+    for scam_type in ("scholarship_fraud", "airline_ticket_refund"):
+        assert scam_type in by_type
+        entry = by_type[scam_type]
+        for field in ("keywords", "tactics", "red_flags", "typical_case", "prevention", "legal_refs"):
+            assert entry[field], f"{scam_type} missing {field}"
+
+
+def test_p0_scholarship_and_airline_rules_reach_high_risk() -> None:
+    from app.services.risk_engine import RiskEngine
+
+    engine = RiskEngine()
+    scholarship = engine.evaluate_text(
+        "学校助学金补录要先交认证费，还让我提供验证码",
+        [{"name": "助学金/奖学金诈骗"}],
+        "student",
+        None,
+    )
+    airline = engine.evaluate_text(
+        "航班取消，航司客服发改签链接让我先付补差价并提供验证码",
+        [{"name": "机票退改签诈骗"}],
+        "general",
+        None,
+    )
+
+    assert scholarship["level"] in {"high", "critical"}
+    assert airline["level"] in {"high", "critical"}
+    assert "scholarship_fraud" in {item["rule"] for item in scholarship["matched_rules"]}
+    assert "airline_ticket_refund" in {item["rule"] for item in airline["matched_rules"]}
+
+
+def test_p0_negated_risk_actions_do_not_score_or_set_facts() -> None:
+    from app.services.risk_engine import RiskEngine
+
+    engine = RiskEngine()
+    result = engine.evaluate_text(
+        "公检法不会要求转账到安全账户，也不要向任何人提供验证码",
+        [],
+        "general",
+        None,
+    )
+    assert result["score"] == 0
+    assert not {"authority_pressure", "account_takeover", "transfer_critical"}.intersection(
+        item["rule"] for item in result["matched_rules"]
+    )
+
+    chat = client.post("/chat", json={
+        "user_id": 9801,
+        "message": "对方没有要求我转账，也没有向我要验证码",
+    })
+    assert chat.status_code == 200
+    facts = chat.json()["known_facts"]
+    assert facts.get("has_transfer_request") is not True
+    assert facts.get("has_verification_code_request") is not True
+
+
+def test_p0_report_negation_avoids_keyword_false_positive() -> None:
+    response = client.post("/report", json={
+        "user_id": 9803,
+        "content": "官方提醒：不要提供验证码，也不需要缴纳保证金或认证费",
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["verdict"] == "safe"
+    assert data["risk_breakdown"]["content_score"] == 0
+    assert data["matched_keywords"] == []
+
+
+def test_p0_trust_reassurance_remains_suspicious() -> None:
+    from app.services.risk_engine import RiskEngine
+
+    result = RiskEngine().evaluate_text(
+        "对方一直强调这不是诈骗，是正规平台，绝对安全",
+        [],
+        "general",
+        None,
+    )
+    assert "trust_reassurance" in {item["rule"] for item in result["matched_rules"]}
+
+
+def test_p0_whitelist_uses_domain_boundary() -> None:
+    from app.services.risk_engine import RiskEngine
+
+    engine = RiskEngine()
+    official = engine.evaluate_url("https://service.edu.cn/notice")
+    suffix_attack = engine.evaluate_url("http://evilgov.cn/login")
+    userinfo_attack = engine.evaluate_url("https://gov.cn@evil.com/login")
+
+    assert official["score"] == 0
+    assert official["matched_rules"][0]["rule"] == "domain_whitelist"
+    assert suffix_attack["score"] > 0
+    assert all(item["rule"] != "domain_whitelist" for item in suffix_attack["matched_rules"])
+    assert all(item["rule"] != "domain_whitelist" for item in userinfo_attack["matched_rules"])
+
+
+def test_p0_domain_impersonation_and_typosquatting() -> None:
+    from app.services.risk_engine import RiskEngine
+
+    engine = RiskEngine()
+    official = engine.evaluate_url("https://www.taobao.com/order")
+    subdomain_attack = engine.evaluate_url("https://taobao.com.evil.top/login")
+    typo_attack = engine.evaluate_url("https://aircnina.com/refund")
+
+    assert official["score"] == 0
+    assert subdomain_attack["score"] >= 20
+    assert "subdomain_disguise" in {item["rule"] for item in subdomain_attack["matched_rules"]}
+    assert "typosquatting" in {item["rule"] for item in typo_attack["matched_rules"]}
+
+
+def test_p0_rule_matches_expose_version_and_rationale() -> None:
+    response = client.post("/chat", json={
+        "user_id": 9802,
+        "message": "助学金补录要求先交认证费并提供验证码",
+        "user_profile": {"role": "student"},
+    })
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ruleset_versions"]["text"] == "2.1.0"
+    assert data["ruleset_versions"]["url"] == "2.2.0"
+    configured_rules = [item for item in data["matched_rules"] if item["rule"] == "scholarship_fraud"]
+    assert configured_rules
+    assert configured_rules[0]["rule_version"]
+    assert configured_rules[0]["ruleset_version"] == "2.1.0"
+    assert configured_rules[0]["rationale"]
+
+
+def test_p0_airline_scenario_is_available() -> None:
+    scenarios = client.get("/scenarios").json()
+    airline = next((item for item in scenarios if item["id"] == "C010"), None)
+    assert airline is not None
+    assert airline["scam_type"] == "airline_ticket_refund"
+
+
+def test_rule_admin_requires_token_and_lists_versions() -> None:
+    from app.main import ADMIN_TOKEN
+
+    denied = client.get("/admin/rules/overview")
+    assert denied.status_code == 401
+
+    response = client.get(
+        "/admin/rules/overview",
+        headers={"x-admin-token": ADMIN_TOKEN},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["active_revision"]["id"] >= 1
+    assert data["ruleset_versions"]["text"]
+    assert data["ruleset_versions"]["url"]
+    assert any(rule["name"] == "trust_reassurance" for rule in data["text_rules"])
+
+
+def test_rule_can_be_disabled_and_hot_reloaded_then_rolled_back() -> None:
+    from app.main import ADMIN_TOKEN, risk_engine
+
+    headers = {"x-admin-token": ADMIN_TOKEN}
+    original = client.get("/admin/rules/overview", headers=headers).json()
+    original_revision = original["active_revision"]["id"]
+    message = "对方强调这不是诈骗，是正规平台，绝对安全"
+
+    before = risk_engine.evaluate_text(message, [], "general", None)
+    assert "trust_reassurance" in {item["rule"] for item in before["matched_rules"]}
+
+    try:
+        disabled = client.patch(
+            "/admin/rules/text/trust_reassurance",
+            headers=headers,
+            json={"enabled": False, "change_note": "自动化测试停用规则"},
+        )
+        assert disabled.status_code == 200
+        assert disabled.json()["ruleset_versions"]["text"] != original["ruleset_versions"]["text"]
+
+        after = risk_engine.evaluate_text(message, [], "general", None)
+        assert "trust_reassurance" not in {item["rule"] for item in after["matched_rules"]}
+
+        history = client.get("/admin/rules/history", headers=headers).json()
+        assert history[0]["action"] == "update"
+        assert "停用" in history[0]["change_summary"]
+    finally:
+        restored = client.post(
+            f"/admin/rules/rollback/{original_revision}",
+            headers=headers,
+            json={"change_note": "自动化测试恢复原规则"},
+        )
+        assert restored.status_code == 200
+
+    recovered = risk_engine.evaluate_text(message, [], "general", None)
+    assert "trust_reassurance" in {item["rule"] for item in recovered["matched_rules"]}
+
+
+def test_new_scam_rule_takes_effect_without_restart_and_can_rollback() -> None:
+    from app.main import ADMIN_TOKEN, risk_engine, storage
+    from app.services.risk_engine import RiskEngine
+    from app.services.rule_management import RuleManagementService
+
+    headers = {"x-admin-token": ADMIN_TOKEN}
+    original = client.get("/admin/rules/overview", headers=headers).json()
+    original_revision = original["active_revision"]["id"]
+    message = "快递破损领取专属补偿码"
+    rule_name = f"fake_delivery_{uuid.uuid4().hex[:8]}"
+
+    try:
+        created = client.post(
+            "/admin/rules/text",
+            headers=headers,
+            json={
+                "name": rule_name,
+                "triggers": ["专属补偿码", "快递破损"],
+                "weight": 24,
+                "reason": "命中快递理赔诱导",
+                "rationale": "自动化测试新增骗局规则",
+                "version": "1.0",
+                "enabled": True,
+                "change_note": "测试新增骗局无需重启",
+            },
+        )
+        assert created.status_code == 200
+        result = risk_engine.evaluate_text(message, [], "general", None)
+        assert rule_name in {item["rule"] for item in result["matched_rules"]}
+        assert result["level"] == "medium"
+
+        reloaded_engine = RiskEngine()
+        RuleManagementService(reloaded_engine, storage)
+        persisted = reloaded_engine.evaluate_text(message, [], "general", None)
+        assert rule_name in {item["rule"] for item in persisted["matched_rules"]}
+    finally:
+        restored = client.post(
+            f"/admin/rules/rollback/{original_revision}",
+            headers=headers,
+            json={"change_note": "自动化测试移除临时规则"},
+        )
+        assert restored.status_code == 200
+
+    result = risk_engine.evaluate_text(message, [], "general", None)
+    assert rule_name not in {item["rule"] for item in result["matched_rules"]}

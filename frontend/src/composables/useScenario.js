@@ -1,10 +1,12 @@
 import { ref } from 'vue'
 import { answerScenario, getScenarios, startScenario } from '../api/scenario.js'
+import { getUserProgress } from '../api/leaderboard.js'
 
 export function useScenario(userRef) {
   const scenarios = ref([])
   const activeScenario = ref(null)
   const latestFeedback = ref(null)
+  const progress = ref(null)
   const loading = ref(false)
   const error = ref('')
 
@@ -19,6 +21,7 @@ export function useScenario(userRef) {
     try {
       const data = await getScenarios()
       scenarios.value = Array.isArray(data) ? data : []
+      await loadProgress()
       return scenarios.value
     } catch (err) {
       error.value = err.message || '关卡加载失败'
@@ -27,6 +30,25 @@ export function useScenario(userRef) {
     } finally {
       loading.value = false
     }
+  }
+
+  async function loadProgress() {
+    const userId = getUserId()
+    if (!userId) {
+      progress.value = null
+      return null
+    }
+
+    progress.value = await getUserProgress(userId)
+    const records = new Map(
+      (Array.isArray(progress.value?.scenario_progress) ? progress.value.scenario_progress : [])
+        .map(item => [item.scenario_id, item]),
+    )
+    scenarios.value = scenarios.value.map(item => ({
+      ...item,
+      progress: records.get(item.id) || null,
+    }))
+    return progress.value
   }
 
   async function beginScenario(scenarioId) {
@@ -49,6 +71,8 @@ export function useScenario(userRef) {
         points_gained: 0,
         total_points: 0,
         badges: [],
+        new_badges: [],
+        run_score: 0,
       }
       return activeScenario.value
     } catch (err) {
@@ -75,7 +99,8 @@ export function useScenario(userRef) {
       activeScenario.value = {
         ...activeScenario.value,
         scenario_id: data.scenario_id,
-        step_index: data.step_index,
+        step_index: data.finished ? data.step_index : data.step_index + 1,
+        total_steps: Number(data.total_steps) || activeScenario.value.total_steps || 1,
         prompt: data.next_prompt || activeScenario.value.prompt,
         options: Array.isArray(data.next_options) ? data.next_options : [],
         finished: Boolean(data.finished),
@@ -83,8 +108,20 @@ export function useScenario(userRef) {
         points_gained: Number(data.points_gained) || 0,
         total_points: Number(data.total_points) || 0,
         badges: Array.isArray(data.badges) ? data.badges : [],
+        new_badges: Array.isArray(data.new_badges) ? data.new_badges : [],
+        run_score: Number(data.run_score) || 0,
+        max_score: Number(data.max_score) || activeScenario.value.max_score || 0,
+        score_percent: Number(data.score_percent) || 0,
+        best_score: Number(data.best_score) || 0,
+        first_clear: Boolean(data.first_clear),
+        score_improvement: Number(data.score_improvement) || 0,
+        attempts: Number(data.attempts) || activeScenario.value.attempts || 0,
+        completions: Number(data.completions) || 0,
         case_summary: data.case_summary || activeScenario.value.case_summary || null,
         debrief: Array.isArray(data.debrief) && data.debrief.length ? data.debrief : (activeScenario.value.debrief || []),
+      }
+      if (data.finished) {
+        await loadProgress()
       }
       return activeScenario.value
     } catch (err) {
@@ -105,9 +142,11 @@ export function useScenario(userRef) {
     scenarios,
     activeScenario,
     latestFeedback,
+    progress,
     loading,
     error,
     loadScenarios,
+    loadProgress,
     beginScenario,
     chooseOption,
     resetScenario,

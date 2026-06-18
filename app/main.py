@@ -13,7 +13,9 @@ from fastapi.staticfiles import StaticFiles
 from app.models.schemas import (
     AIChatRequest,
     AIChatResponse,
+    ChatHistoryResponse,
     ChatRequest,
+    ChatResetRequest,
     ChatResponse,
     LeaderboardResponse,
     LoginRequest,
@@ -22,32 +24,44 @@ from app.models.schemas import (
     ReportRequest,
     ReportResponse,
     ReportHistoryResponse,
+    ReportStatusUpdate,
+    RuleRollbackRequest,
+    RuleUpdateRequest,
     ScamEntryCreate,
     ScenarioAnswerRequest,
     ScenarioAnswerResponse,
     ScenarioStartRequest,
     ScenarioStartResponse,
     ScenarioSummary,
+    TextRuleCreateRequest,
     UserInfoResponse,
     UserProgressResponse,
 )
 from app.services.auth_service import AuthService
+from app.services.ai_risk_service import AIRiskAssessor
+from app.services.chat_workflow import ChatWorkflowRunner
+from app.services.dashboard_service import DashboardService
 from app.services.dialogue_service import DialogueService
+from app.services.env_loader import load_dotenv
 from app.services.gamification import GamificationService
 from app.services.intent_recognizer import IntentRecognizer
 from app.services.knowledge_base import KnowledgeBase
+from app.services.knowledge_retriever import KnowledgeRetriever
 from app.services.report_service import ReportService
+from app.services.rag_reply_service import RagReplyGenerator
 from app.services.risk_engine import RiskEngine
+from app.services.rule_management import RuleManagementService
 from app.services.scenario_service import ScenarioService
 from app.services.storage import SQLiteStorage
 
 BASE_DIR = Path(__file__).resolve().parent
 PROJECT_ROOT = BASE_DIR.parent
+load_dotenv(PROJECT_ROOT / ".env")
 FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
 FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
 LEGACY_WEB_DIR = BASE_DIR / "web"
-SPA_ROUTES = {"login", "chat", "report", "game", "knowledge", "leaderboard", "profile"}
-API_PREFIXES = {"health", "auth", "chat", "ai", "report", "scenarios", "users", "leaderboard", "knowledge"}
+SPA_ROUTES = {"login", "chat", "report", "game", "knowledge", "leaderboard", "profile", "admin"}
+API_PREFIXES = {"health", "auth", "chat", "ai", "report", "reports", "scenarios", "users", "leaderboard", "knowledge", "admin"}
 ADMIN_TOKEN = os.getenv("ANTI_FRAUD_ADMIN_TOKEN", "change-me")
 JWT_SECRET = os.getenv("JWT_SECRET", "anti-fraud-lab-secret-key-change-in-production-2024")
 
@@ -67,12 +81,20 @@ ALLOWED_ORIGINS = (
 
 # ── Rate Limiting (in-memory, no external deps) ──
 RATE_LIMIT_RPM = int(os.getenv("RATE_LIMIT_RPM", "0"))  # 0 = disabled
+REQUIRE_AUTH = os.getenv("REQUIRE_AUTH", "1").lower() not in {"0", "false", "no"}
+RAG_RETRIEVAL_ENABLED = os.getenv("RAG_RETRIEVAL_ENABLED", "1").lower() not in {"0", "false", "no"}
 
 knowledge_base = KnowledgeBase(BASE_DIR / "data" / "knowledge_base.json")
 intent_recognizer = IntentRecognizer()
 risk_engine = RiskEngine()
 _db_path = os.getenv("DB_PATH") or str(BASE_DIR / "data" / "anti_fraud.db")
 storage = SQLiteStorage(Path(_db_path))
+rule_management_service = RuleManagementService(risk_engine=risk_engine, storage=storage)
+dashboard_service = DashboardService(
+    storage=storage,
+    knowledge_base=knowledge_base,
+    rule_management=rule_management_service,
+)
 gamification_service = GamificationService(storage=storage)
 auth_service = AuthService(storage=storage, secret_key=JWT_SECRET)
 report_service = ReportService(
@@ -84,12 +106,32 @@ scenario_service = ScenarioService(
     data_path=BASE_DIR / "data" / "scenarios.json",
     gamification=gamification_service,
 )
+knowledge_retriever = (
+    KnowledgeRetriever.from_env()
+    if RAG_RETRIEVAL_ENABLED
+    else None
+)
+rag_reply_generator = (
+    RagReplyGenerator()
+    if (
+        os.getenv("RAG_LLM_ENABLED", "0").lower() in {"1", "true", "yes"}
+        or os.getenv("CHAT_LLM_ENABLED", "0").lower() in {"1", "true", "yes"}
+    )
+    else None
+)
+ai_risk_assessor = AIRiskAssessor()
 dialogue_service = DialogueService(
     knowledge_base=knowledge_base,
     intent_recognizer=intent_recognizer,
     risk_engine=risk_engine,
     gamification=gamification_service,
+    knowledge_retriever=knowledge_retriever,
+    rag_reply_generator=rag_reply_generator,
+    ai_risk_assessor=ai_risk_assessor,
+    storage=storage,
 )
+if os.getenv("CHAT_FLOW_ENGINE", "classic").lower() in {"langgraph", "graph"}:
+    dialogue_service = ChatWorkflowRunner(dialogue_service)
 
 app = FastAPI(
     title="Anti-Fraud Multi-modal Dialogue System",
@@ -159,6 +201,7 @@ def home() -> FileResponse:
 @app.get("/game", include_in_schema=False)
 @app.get("/knowledge", include_in_schema=False)
 @app.get("/profile", include_in_schema=False)
+@app.get("/admin/rules", include_in_schema=False)
 def vue_page() -> FileResponse:
     return FileResponse(_frontend_index_file())
 
@@ -168,13 +211,87 @@ def health() -> dict[str, str]:
     return {"status": "ok", "service": "anti-fraud-dialogue"}
 
 
+@app.get("/health/rag")
+def rag_health() -> dict[str, object]:
+    return KnowledgeRetriever.health_from_env(
+        knowledge_retriever,
+        enabled=RAG_RETRIEVAL_ENABLED,
+    )
+
+
+def _resolve_user(
+    requested_user_id: int,
+    authorization: str | None,
+) -> dict[str, object] | None:
+    if not authorization:
+        if REQUIRE_AUTH:
+            raise HTTPException(status_code=401, detail="请先登录后再使用该功能")
+        return None
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="未提供有效令牌")
+
+    user = auth_service.get_current_user(authorization.removeprefix("Bearer "))
+    if not user:
+        raise HTTPException(status_code=401, detail="令牌无效或已过期")
+    if int(user["id"]) != requested_user_id:
+        raise HTTPException(status_code=403, detail="不能访问或修改其他用户的数据")
+    return user
+
+
+def _require_admin(x_admin_token: str | None) -> None:
+    if x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(status_code=401, detail="管理员令牌错误")
+
+
 @app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest) -> ChatResponse:
+def chat(
+    request: ChatRequest,
+    authorization: str | None = Header(default=None),
+) -> ChatResponse:
+    user = _resolve_user(request.user_id, authorization)
+    if user:
+        request = request.model_copy(
+            update={
+                "user_profile": request.user_profile.model_copy(update={"role": user["role"]}),
+            }
+        )
     return ChatResponse.model_validate(dialogue_service.process_chat(request))
 
 
+@app.post("/chat/reset")
+def reset_chat(
+    request: ChatResetRequest,
+    authorization: str | None = Header(default=None),
+) -> dict[str, str]:
+    _resolve_user(request.user_id, authorization)
+    dialogue_service.reset_conversation(request.user_id)
+    return {"message": "对话状态已重置"}
+
+
+@app.get("/users/{user_id}/chat/history", response_model=ChatHistoryResponse)
+def get_user_chat_history(
+    user_id: int,
+    limit: int = Query(default=50, ge=1, le=200),
+    authorization: str | None = Header(default=None),
+) -> ChatHistoryResponse:
+    _resolve_user(user_id, authorization)
+    items = storage.list_chat_messages(user_id=user_id, limit=limit)
+    return ChatHistoryResponse.model_validate(
+        {
+            "user_id": user_id,
+            "total": len(items),
+            "items": items,
+        }
+    )
+
+
 @app.post("/report", response_model=ReportResponse)
-def report(request: ReportRequest) -> ReportResponse:
+def report(
+    request: ReportRequest,
+    authorization: str | None = Header(default=None),
+) -> ReportResponse:
+    _resolve_user(request.user_id, authorization)
     result = report_service.analyze(
         user_id=request.user_id,
         url=request.url,
@@ -198,8 +315,7 @@ def add_scam(
     entry: ScamEntryCreate,
     x_admin_token: str | None = Header(default=None),
 ) -> dict[str, str]:
-    if x_admin_token != ADMIN_TOKEN:
-        raise HTTPException(status_code=401, detail="管理员令牌错误")
+    _require_admin(x_admin_token)
 
     try:
         knowledge_base.add_scam(entry.model_dump())
@@ -215,7 +331,11 @@ def list_scenarios() -> list[ScenarioSummary]:
 
 
 @app.post("/scenarios/start", response_model=ScenarioStartResponse)
-def start_scenario(request: ScenarioStartRequest) -> ScenarioStartResponse:
+def start_scenario(
+    request: ScenarioStartRequest,
+    authorization: str | None = Header(default=None),
+) -> ScenarioStartResponse:
+    _resolve_user(request.user_id, authorization)
     try:
         data = scenario_service.start(user_id=request.user_id, scenario_id=request.scenario_id)
     except ValueError as exc:
@@ -224,7 +344,11 @@ def start_scenario(request: ScenarioStartRequest) -> ScenarioStartResponse:
 
 
 @app.post("/scenarios/answer", response_model=ScenarioAnswerResponse)
-def answer_scenario(request: ScenarioAnswerRequest) -> ScenarioAnswerResponse:
+def answer_scenario(
+    request: ScenarioAnswerRequest,
+    authorization: str | None = Header(default=None),
+) -> ScenarioAnswerResponse:
+    _resolve_user(request.user_id, authorization)
     try:
         data = scenario_service.answer(user_id=request.user_id, option_index=request.option_index)
     except ValueError as exc:
@@ -233,7 +357,11 @@ def answer_scenario(request: ScenarioAnswerRequest) -> ScenarioAnswerResponse:
 
 
 @app.get("/users/{user_id}/progress", response_model=UserProgressResponse)
-def get_progress(user_id: int) -> UserProgressResponse:
+def get_progress(
+    user_id: int,
+    authorization: str | None = Header(default=None),
+) -> UserProgressResponse:
+    _resolve_user(user_id, authorization)
     data = gamification_service.profile(user_id)
     return UserProgressResponse.model_validate(data)
 
@@ -256,7 +384,9 @@ def get_user_reports(
     limit: int = Query(default=20, ge=1, le=100),
     start_at: datetime | None = Query(default=None),
     end_at: datetime | None = Query(default=None),
+    authorization: str | None = Header(default=None),
 ) -> ReportHistoryResponse:
+    _resolve_user(user_id, authorization)
     normalized_start_at = _to_storage_datetime(start_at)
     normalized_end_at = _to_storage_datetime(end_at)
 
@@ -276,6 +406,91 @@ def get_user_reports(
             "items": items,
         }
     )
+
+
+@app.patch("/reports/{report_id}/status")
+def update_report_status(
+    report_id: str,
+    update: ReportStatusUpdate,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, str]:
+    _require_admin(x_admin_token)
+    if not storage.update_report_status(report_id, update.status):
+        raise HTTPException(status_code=404, detail="举报记录不存在")
+    return {"report_id": report_id, "status": update.status}
+
+
+# ── 规则管理与热加载 ──
+
+@app.get("/admin/rules/overview")
+def rule_overview(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_admin(x_admin_token)
+    return rule_management_service.overview()
+
+
+@app.get("/admin/dashboard/summary")
+def admin_dashboard_summary(
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_admin(x_admin_token)
+    return dashboard_service.summary()
+
+
+@app.get("/admin/rules/history")
+def rule_history(
+    limit: int = Query(default=30, ge=1, le=100),
+    x_admin_token: str | None = Header(default=None),
+) -> list[dict[str, object]]:
+    _require_admin(x_admin_token)
+    return rule_management_service.history(limit=limit)
+
+
+@app.patch("/admin/rules/{ruleset}/{rule_name}")
+def update_rule(
+    ruleset: str,
+    rule_name: str,
+    request: RuleUpdateRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_admin(x_admin_token)
+    try:
+        return rule_management_service.update_rule(
+            ruleset,
+            rule_name,
+            enabled=request.enabled,
+            weight=request.weight,
+            change_note=request.change_note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/admin/rules/text")
+def create_text_rule(
+    request: TextRuleCreateRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_admin(x_admin_token)
+    payload = request.model_dump(exclude={"change_note"})
+    try:
+        return rule_management_service.add_text_rule(payload, request.change_note)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.post("/admin/rules/rollback/{version_id}")
+def rollback_rules(
+    version_id: int,
+    request: RuleRollbackRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> dict[str, object]:
+    _require_admin(x_admin_token)
+    try:
+        return rule_management_service.rollback(version_id, request.change_note)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
 
 # ── 认证路由 ──

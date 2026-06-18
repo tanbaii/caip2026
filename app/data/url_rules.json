@@ -1,48 +1,132 @@
 {
-  "shortener_domains": ["t.cn", "bit.ly", "tinyurl.com", "dwz.cn", "is.gd"],
-  "risky_tlds": ["top", "xyz", "click", "fit", "work", "icu", "buzz"],
+  "_meta": {
+    "version": "2.2.0",
+    "updated": "2026-06-14",
+    "changelog": {
+      "2.2.0": "将已确认的打字抢注域名提升到中风险阈值，修复规则命中但界面仍显示低风险的问题",
+      "2.1.0": "修复白名单后缀绕过，统一域名规范化，补强品牌词、相邻字符交换与子域名仿冒检测",
+      "2.0.0": "新增域名仿冒检测（域名变形、子域名伪装、关键词仿冒）；新增白名单规则；规则增加版本号与解释依据",
+      "1.0.0": "初始版本，涵盖短链、高风险TLD、IP直连、@符号、Punycode等基础检测"
+    },
+    "rationale": "规则依据《反电信网络诈骗法》关于互联网平台反诈义务、OWASP Top 10 Web安全威胁分类、PhishTank域名分类标准"
+  },
+  "shortener_domains": [
+    "t.cn", "bit.ly", "tinyurl.com", "dwz.cn", "is.gd",
+    "suo.im", "url.cn", "t.co", "ow.ly", "buff.ly"
+  ],
+  "risky_tlds": [
+    "top", "xyz", "click", "fit", "work", "icu", "buzz",
+    "site", "online", "club", "info", "pro", "cc", "tk",
+    "ml", "ga", "cf", "gq"
+  ],
+  "whitelist_domains": [
+    "gov.cn", "edu.cn", "ac.cn", "mil.cn",
+    "12321.cn", "nic.edu.cn"
+  ],
+  "whitelist_note": "仅主域名本身或其真实子域名可命中白名单；evilgov.cn 等字符串后缀不命中。白名单只跳过域名结构加分，页面内容仍需独立研判",
+  "impersonation_patterns": {
+    "famous_domains": {
+      "taobao.com": "淘宝",
+      "tmall.com": "天猫",
+      "jd.com": "京东",
+      "qq.com": "腾讯QQ",
+      "weixin.qq.com": "微信",
+      "12306.cn": "铁路12306",
+      "alipay.com": "支付宝",
+      "icbc.com.cn": "工商银行",
+      "ccb.com": "建设银行",
+      "cmbchina.com": "招商银行",
+      "boc.cn": "中国银行",
+      "airchina.com.cn": "中国国航",
+      "ceair.com": "东方航空",
+      "csair.com": "南方航空",
+      "gov.cn": "中国政府网站",
+      "edu.cn": "中国教育机构"
+    },
+    "weight": 25,
+    "flag_template": "域名疑似仿冒{target}，实际域名为{actual}",
+    "rationale": "依据PhishTank统计数据，仿冒知名电商、银行、航司域名是钓鱼攻击最常见手法"
+  },
   "checks": [
     {
       "name": "missing_protocol",
+      "version": "1.0",
       "condition": "missing_protocol",
       "weight": 15,
-      "flag": "链接未使用标准http/https协议"
+      "flag": "链接未使用标准http/https协议",
+      "rationale": "缺少明确协议的文本链接容易隐藏实际跳转目标，需要二次核验"
     },
     {
       "name": "ip_direct",
+      "version": "1.0",
       "condition": "ip_direct",
       "weight": 20,
-      "flag": "域名使用IP直连"
+      "flag": "域名使用IP直连",
+      "rationale": "面向公众的正规业务通常使用可验证域名，IP直连常见于临时钓鱼页面"
     },
     {
       "name": "at_symbol",
+      "version": "1.0",
       "condition": "at_symbol",
       "weight": 20,
-      "flag": "URL包含@符号，可能存在跳转伪装"
+      "flag": "URL包含@符号，可能存在跳转伪装",
+      "rationale": "URL用户信息段可利用@符号把可信名称放在真实主机名前制造视觉误导"
     },
     {
       "name": "punycode",
+      "version": "1.0",
       "condition": "punycode",
       "weight": 20,
-      "flag": "检测到punycode域名"
+      "flag": "检测到punycode域名",
+      "rationale": "Punycode可承载国际化同形字符，常被用于仿冒品牌域名"
     },
     {
       "name": "shortener",
+      "version": "1.0",
       "condition": "shortener_domain",
       "weight": 15,
-      "flag": "短链域名需要二次核验"
+      "flag": "短链域名需要二次核验",
+      "rationale": "短链隐藏最终落地域名，用户无法在点击前直接核验目标站点"
     },
     {
       "name": "risky_tld",
+      "version": "1.0",
       "condition": "risky_tld",
       "weight": 12,
-      "flag": "域名后缀命中高风险集合"
+      "flag": "域名后缀命中高风险集合",
+      "rationale": "部分低成本或滥用率较高的后缀在钓鱼样本中出现频率较高，但不能单独作为诈骗结论"
     },
     {
       "name": "plain_http",
+      "version": "1.0",
       "condition": "plain_http",
       "weight": 10,
-      "flag": "未使用HTTPS加密"
+      "flag": "未使用HTTPS加密",
+      "rationale": "HTTP无法提供传输加密与服务端证书校验，不适合提交账号或支付信息"
+    },
+    {
+      "name": "subdomain_disguise",
+      "version": "2.0",
+      "condition": "subdomain_disguise",
+      "weight": 20,
+      "flag": "检测到子域名伪装（使用知名域名作为子域名部分）",
+      "rationale": "如 taobao.com.evil.top 利用知名域名作为子域名进行伪装"
+    },
+    {
+      "name": "typosquatting",
+      "version": "2.2",
+      "condition": "typosquatting",
+      "weight": 20,
+      "flag": "检测到打字抢注型域名（相似字符替换）",
+      "rationale": "如aircnina.com、ta0bao.com等通过形近字混淆"
+    },
+    {
+      "name": "keyword_impersonation",
+      "version": "2.0",
+      "condition": "keyword_impersonation",
+      "weight": 15,
+      "flag": "域名包含安全、认证、官网等诱导性关键词组合",
+      "rationale": "如 secure-bank-login.top、official-verify.xyz 等伪装安全验证页面"
     }
   ],
   "score_levels": {
