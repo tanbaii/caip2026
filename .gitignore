@@ -43,8 +43,8 @@ model/
 # Sub-project (separate git repo)
 caip2026/
 
-# Training/eval data
-data/
+# Training/eval data (root level only)
+/data/
 
 # OS
 .DS_Store
