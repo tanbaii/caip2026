@@ -46,6 +46,9 @@ caip2026/
 # Training/eval data (root level only)
 /data/
 
+# Generated evaluation reports
+evaluation_results/
+
 # OS
 .DS_Store
 Thumbs.db
