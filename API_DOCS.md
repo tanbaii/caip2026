@@ -35,6 +35,7 @@
 | 20 | PATCH | `/admin/rules/{ruleset}/{rule_name}` | `update_rule()` | 规则管理页 | x-admin-token |
 | 21 | POST | `/admin/rules/text` | `create_text_rule()` | 规则管理页 | x-admin-token |
 | 22 | POST | `/admin/rules/rollback/{version_id}` | `rollback_rules()` | 规则管理页 | x-admin-token |
+| 23 | GET | `/admin/dashboard/summary` | `admin_dashboard_summary()` | 后台看板 | x-admin-token |
 
 共 22 个端点。
 
@@ -510,6 +511,7 @@ GET /users/1/reports?limit=10&start_at=2026-04-01T00:00:00&end_at=2026-05-01T00:
 | typical_case | str | 是 | 5-300 字符 | 典型案例描述 |
 | prevention | list[str] | 是 | min 1 项 | 防范建议 |
 | legal_refs | list[str] | 是 | min 1 项 | 法律依据 |
+| sources | list[object] | 否 | 默认 `[]` | 权威来源，可包含 `title`、`organization`、`url`、`collected_at` |
 
 **响应**: `{"message": "新增骗局已接入知识库", "type": "<type>"}`
 
@@ -518,6 +520,23 @@ GET /users/1/reports?limit=10&start_at=2026-04-01T00:00:00&end_at=2026-05-01T00:
 ---
 
 ## 规则管理接口
+
+### GET /admin/dashboard/summary — 后台运营看板
+
+返回后台看板聚合数据。请求头：`X-Admin-Token`。
+
+核心字段：
+
+| 字段 | 说明 |
+|------|------|
+| users | 注册用户数、角色分布、等级分布、勋章分布 |
+| engagement | 累计举报、闯关完成、高危劝阻、知识查询等运营指标 |
+| reports | 举报总量、风险分布、状态分布、近 7 日趋势、Top 关键词/域名、最近举报队列 |
+| scenarios | 各关卡尝试次数、完成次数、平均最佳分 |
+| knowledge | 骗局条目数、法律条目数、带权威来源的知识条目数 |
+| rules | 当前规则版本、启停数量、最近规则变更记录 |
+
+举报队列只返回已脱敏的 `content_summary` 和 `url_host`，不返回原始举报文本。
 
 ### GET /admin/rules/overview — 当前规则
 

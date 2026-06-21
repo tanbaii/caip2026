@@ -18,7 +18,7 @@
 
 | 维度 | 内容 |
 |------|------|
-| **对应功能** | 结构化反诈知识库，含 11 类骗局（覆盖刷单返利、游戏交易、冒充公检法、虚假投资、校园贷、助学金/奖学金、机票退改签、AI深度伪造等）和 5 部法律法规 |
+| **对应功能** | 结构化反诈知识库，含 14 类骗局（覆盖刷单返利、游戏交易、冒充公检法、虚假投资、校园贷、助学金/奖学金、机票退改签、AI深度伪造、人社/社保补贴钓鱼、银行账户异常认证、高考招生录取诈骗等）和 5 部法律法规 |
 | **数据结构** | JSON Schema 化：每条骗局含 `id`、`type`、`name`、`keywords`、`tactics`、`red_flags`、`typical_case`、`prevention`、`legal_refs` |
 | **演示入口** | `GET /knowledge/scams` → 返回全部骗局条目；`GET /knowledge/laws` → 返回法律要点 |
 | **前端入口** | `/knowledge` 知识库页面，支持关键词搜索过滤 |
@@ -31,7 +31,7 @@
 | 维度 | 内容 |
 |------|------|
 | **对应功能** | ① JSON 配置驱动的风险规则引擎（14 条文本规则 + 10 类 URL 结构检查 + 品牌仿冒检测）；② 轻量级意图识别器 |
-| **规则配置** | 每条规则含名称、触发词、权重、原因、版本和依据；文本规则集 `2.1.0`，URL 规则集 `2.2.0`。支持同分句否定语义、域名边界白名单、子域名伪装、相似字符与相邻字符交换检测 |
+| **规则配置** | 每条规则含名称、触发词、权重、原因、版本和依据；文本规则集 `2.2.0`，URL 规则集 `2.3.0`。支持同分句否定语义、域名边界白名单、子域名伪装、相似字符与相邻字符交换检测 |
 | **演示入口** | `/chat` 和 `/report` 返回 `matched_rules`、`risk_breakdown`、`ruleset_versions`；`/admin/rules` 可查看版本、启停调权、新增规则和回滚 |
 | **相关文件** | `app/data/risk_rules.json`、`app/data/url_rules.json`、`app/services/risk_engine.py`、`app/services/rule_management.py`、`app/services/intent_recognizer.py` |
 | **可验证证据** | `test_p0_negated_risk_actions_do_not_score_or_set_facts`：否定语义抑制误报；`test_p0_whitelist_uses_domain_boundary`：白名单无后缀绕过；`test_p0_domain_impersonation_and_typosquatting`：域名仿冒检测；`test_p0_rule_matches_expose_version_and_rationale`：版本与依据可见 |
@@ -90,7 +90,7 @@
 
 | 维度 | 说明 |
 |------|------|
-| **真实场景覆盖** | 覆盖刷单返利、冒充公检法、虚假投资、校园贷、助学金/奖学金、机票退改签、冒充客服、AI 深度伪造等 11 类高频骗局 |
+| **真实场景覆盖** | 覆盖刷单返利、冒充公检法、虚假投资、校园贷、助学金/奖学金、机票退改签、冒充客服、人社/社保补贴钓鱼、银行账户异常认证、高考招生录取、AI 深度伪造等 14 类高频骗局 |
 | **URL 风险检测** | 10 类 URL 结构检查，并增加品牌域名仿冒、白名单边界、IDN/Punycode 规范化与相邻字符交换检测 |
 | **关键词黑名单** | 举报服务内置 20+ 诈骗关键词，覆盖传统话术和新型 AI 诈骗术语 |
 | **一键举报** | `/report` 接口支持 URL + 文本同时提交，返回判定结果、风险分、命中关键词、处置建议 |
@@ -106,14 +106,14 @@
 
 | 维度 | 说明 |
 |------|------|
-| **测试覆盖** | 103 个自动化测试（`pytest -q`），覆盖：API、规则引擎、规则热加载与回滚、演示数据初始化、聊天与举报否定语义、域名白名单边界、域名仿冒、离线指标评测、知识库、认证、举报、游戏化、多轮对话与脱敏 |
+| **测试覆盖** | 106 个自动化测试（`pytest -q`），覆盖：API、规则引擎、规则热加载与回滚、后台看板、演示数据初始化、聊天与举报否定语义、域名白名单边界、域名仿冒、离线指标评测、知识库、认证、举报、游戏化、多轮对话与脱敏 |
 | **测试隔离** | 每个测试使用独立临时数据库（`conftest.py`），测试间零状态污染 |
 | **代码规范** | Pydantic v2 Schema 校验所有入参和出参；类型注解全覆盖；模块化服务架构（RiskEngine、DialogueService、ReportService 独立可测） |
 | **配置管理** | 风险规则 JSON 配置化；规则快照持久化到 SQLite；数据库路径、JWT 密钥、管理员令牌、CORS 来源、限流参数均通过环境变量配置 |
 | **错误降级** | 配置文件缺失时回退内置默认规则；Ollama 未运行时返回降级提示；API 返回统一错误格式 |
 | **文档完整** | README（部署指南 + 烟雾测试）、SECURITY_DESIGN.md（安全设计）、USAGE_GUIDE.md（交互手册）、SCORING_ALIGNMENT.md（评分映射）、DEMO_SCRIPT.md（答辩脚本） |
 | **前端构建** | `npm run build` 通过，Vite 生产构建，CSS 9.38 KB + JS 64.75 KB（gzip） |
-| **可验证证据** | `pytest -q` → 103 passed；`npm run build` → 生产构建通过 |
+| **可验证证据** | `pytest -q` → 106 passed；`npm run build` → 生产构建通过；`scripts/evaluate_rules.py` → 35 个离线规则样本 100% 通过 |
 
 ---
 
@@ -148,7 +148,7 @@
 
 ```bash
 # 后端测试
-pytest -q                           # 103 passed
+pytest -q                           # 106 passed
 
 # 前端构建
 cd frontend && npm run build        # built in ~30s

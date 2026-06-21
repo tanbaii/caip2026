@@ -40,6 +40,12 @@ model/
 # Claude local workspace
 .claude/
 
+# Sub-project (separate git repo)
+caip2026/
+
+# Training/eval data
+data/
+
 # OS
 .DS_Store
 Thumbs.db

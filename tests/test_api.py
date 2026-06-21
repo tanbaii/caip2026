@@ -183,12 +183,22 @@ def test_knowledge_base_is_enriched() -> None:
     scams_response = client.get("/knowledge/scams")
     assert scams_response.status_code == 200
     scams = scams_response.json()
-    assert len(scams) >= 8
+    assert len(scams) >= 14
 
     scam_types = {item["type"] for item in scams}
-    assert {"fake_refund_customer_service", "acquaintance_impersonation", "fake_logistics_compensation"}.issubset(
-        scam_types
-    )
+    assert {
+        "fake_refund_customer_service",
+        "acquaintance_impersonation",
+        "fake_logistics_compensation",
+        "hrss_subsidy_phishing",
+        "bank_account_abnormal_phishing",
+        "exam_admission_fraud",
+    }.issubset(scam_types)
+    official_entries = [
+        item for item in scams
+        if item["type"] in {"airline_ticket_refund", "hrss_subsidy_phishing", "bank_account_abnormal_phishing", "exam_admission_fraud"}
+    ]
+    assert all(item.get("sources") for item in official_entries)
 
     laws_response = client.get("/knowledge/laws")
     assert laws_response.status_code == 200
@@ -982,7 +992,7 @@ def test_multi_turn_second_round_escalates_with_new_facts() -> None:
 
 
 def test_multi_turn_authority_transfer_goes_warning() -> None:
-    """公检法 + 安全账户 + 已经转账 进入 warning / critical"""
+    """公检法 + 安全账户 + 已经转账 进入 loss_recovery / critical"""
     user_id = 9102
     # 第一轮
     client.post("/chat", json={
@@ -1002,7 +1012,7 @@ def test_multi_turn_authority_transfer_goes_warning() -> None:
     assert d2["known_facts"].get("mentions_authority") is True
     assert d2["known_facts"].get("has_transfer_request") is True
     assert d2["known_facts"].get("already_paid") is True
-    assert d2["session_stage"] == "warning"
+    assert d2["session_stage"] == "loss_recovery"
     assert d2["risk_level"] in ("high", "critical")
     assert d2["risk_breakdown"].get("conversation_score", 0) > 0
 
@@ -1022,7 +1032,8 @@ def test_multi_turn_known_facts_accumulate() -> None:
     })
     assert r2.status_code == 200
     d2 = r2.json()
-    assert d2["known_facts"].get("has_remote_control") is True
+    assert d2["known_facts"].get("has_remote_control_request") is True
+    assert d2["known_facts"].get("has_remote_control") is not True
     assert d2["known_facts"].get("has_secrecy_pressure") is True
     assert d2["turn_count"] == 2
 
@@ -1091,8 +1102,8 @@ def test_multi_turn_ai_deepfake_refuse_verify_escalates() -> None:
     assert has_conv_rule or d2["risk_level"] in ("high", "critical")
 
 
-def test_multi_turn_warning_stops_questioning() -> None:
-    """warning 阶段 pending_questions 应为空（不再追问）"""
+def test_multi_turn_loss_recovery_stops_questioning() -> None:
+    """已转账后进入 loss_recovery，pending_questions 应为空（不再追问）"""
     user_id = 9106
     client.post("/chat", json={
         "user_id": user_id,
@@ -1107,12 +1118,12 @@ def test_multi_turn_warning_stops_questioning() -> None:
     })
     assert r2.status_code == 200
     d2 = r2.json()
-    assert d2["session_stage"] == "warning"
+    assert d2["session_stage"] == "loss_recovery"
     assert d2["pending_questions"] == []
 
 
-def test_multi_turn_reply_contains_stop_loss_in_warning() -> None:
-    """warning 阶段回复应包含止损指导"""
+def test_multi_turn_reply_contains_stop_loss_in_loss_recovery() -> None:
+    """loss_recovery 阶段回复应包含止损指导"""
     user_id = 9107
     client.post("/chat", json={
         "user_id": user_id,
@@ -1132,13 +1143,12 @@ def test_multi_turn_reply_contains_stop_loss_in_warning() -> None:
 
 
 def test_multi_turn_stage_consistent_with_final_risk_level() -> None:
-    """conversation_score 加成导致 risk_level 升级后，session_stage 与最终 risk_level 一致。
+    """conversation_score 加成导致诈骗可能性升级后，未执行动作仍停在预防阶段。
 
     场景：
       Round 1: "有人自称公安局的要调查我" → mentions_authority，基础分低
-      Round 2: "他让我转账到安全账户" → 基础分 medium (authority_pressure=20)，
-              但 conversation bonus +25 (conv_authority_transfer) 推至 high。
-              此时 session_stage 应为 warning（high + turn>=2），pending_questions 为空。
+      Round 2: "他让我转账到安全账户" → scam_likelihood 可升至 high，
+              但这是“对方要求”，不是“用户已转账”，所以 session_stage 应为 preventive_warning。
     """
     user_id = 9200
     r1 = client.post("/chat", json={
@@ -1162,11 +1172,10 @@ def test_multi_turn_stage_consistent_with_final_risk_level() -> None:
     assert d2["risk_level"] in ("high", "critical")
     # 关键验证：conversation_score 生效
     assert d2["risk_breakdown"].get("conversation_score", 0) > 0
-    # 关键验证：session_stage 与最终 risk_level 一致，不应停留在 collecting/assessing
-    assert d2["session_stage"] == "warning", \
-        f"Expected warning but got {d2['session_stage']} with risk_level={d2['risk_level']}"
-    # warning 阶段 pending_questions 必须为空
-    assert d2["pending_questions"] == []
+    # 关键验证：高诈骗可能不等于用户已经执行危险动作
+    assert d2["session_stage"] == "preventive_warning", \
+        f"Expected preventive_warning but got {d2['session_stage']} with risk_level={d2['risk_level']}"
+    assert d2["current_danger_level"] in {"medium", "high"}
     # known_facts 跨轮累积
     assert d2["known_facts"].get("mentions_authority") is True
     assert d2["known_facts"].get("has_transfer_request") is True
@@ -1440,6 +1449,13 @@ def test_progress_includes_high_risk_blocks() -> None:
     })
     assert response.status_code == 200
 
+    confirmed = client.post("/chat", json={
+        "user_id": user_id,
+        "message": "我已经报警，也已经联系银行冻结账户",
+        "user_profile": {"role": "student"},
+    })
+    assert confirmed.status_code == 200
+
     progress = client.get(f"/users/{user_id}/progress")
     assert progress.status_code == 200
     assert progress.json()["high_risk_blocks"] >= 1
@@ -1659,13 +1675,58 @@ def test_p0_rule_matches_expose_version_and_rationale() -> None:
     })
     assert response.status_code == 200
     data = response.json()
-    assert data["ruleset_versions"]["text"] == "2.1.0"
-    assert data["ruleset_versions"]["url"] == "2.2.0"
+    assert data["ruleset_versions"]["text"] == "2.2.0"
+    assert data["ruleset_versions"]["url"] == "2.3.0"
     configured_rules = [item for item in data["matched_rules"] if item["rule"] == "scholarship_fraud"]
     assert configured_rules
     assert configured_rules[0]["rule_version"]
-    assert configured_rules[0]["ruleset_version"] == "2.1.0"
+    assert configured_rules[0]["ruleset_version"] == "2.2.0"
     assert configured_rules[0]["rationale"]
+
+
+def test_online_sources_rules_cover_new_official_scenarios() -> None:
+    from app.services.risk_engine import RiskEngine
+
+    engine = RiskEngine()
+    hrss = engine.evaluate_text(
+        "社保通知说国家人社部补贴申领要登录人社部官网认证登记，逾期申请视为放弃，还要验证码",
+        [{"name": "人社/社保补贴钓鱼"}],
+        "general",
+        "anxious",
+    )
+    bank = engine.evaluate_text(
+        "银行短信说我的信用账户触发风控系统，点击链接核验信息并提供验证码，否则银行卡冻结",
+        [{"name": "银行账户异常认证钓鱼"}],
+        "general",
+        None,
+    )
+    exam = engine.evaluate_text(
+        "有人自称招生办有补录名额和内部指标，让我先交录取费保证金",
+        [{"name": "高考招生录取诈骗"}],
+        "student",
+        "anxious",
+    )
+
+    assert "hrss_subsidy_phishing" in {item["rule"] for item in hrss["matched_rules"]}
+    assert "bank_account_abnormal_phishing" in {item["rule"] for item in bank["matched_rules"]}
+    assert "exam_admission_fraud" in {item["rule"] for item in exam["matched_rules"]}
+    assert hrss["level"] in {"high", "critical"}
+    assert bank["level"] in {"medium", "high", "critical"}
+    assert exam["level"] in {"high", "critical"}
+
+
+def test_online_source_url_brand_updates() -> None:
+    from app.services.risk_engine import RiskEngine
+
+    engine = RiskEngine()
+    official_hrss = engine.evaluate_url("https://www.mohrss.gov.cn/")
+    fake_apple = engine.evaluate_url("https://apple.com.security-verify.top/login")
+    fake_hrss = engine.evaluate_url("https://mohrss.gov.cn.evil.top/subsidy")
+
+    assert official_hrss["score"] == 0
+    assert official_hrss["matched_rules"][0]["rule"] == "domain_whitelist"
+    assert "subdomain_disguise" in {item["rule"] for item in fake_apple["matched_rules"]}
+    assert "domain_impersonation" in {item["rule"] for item in fake_hrss["matched_rules"]}
 
 
 def test_p0_airline_scenario_is_available() -> None:
@@ -1691,6 +1752,33 @@ def test_rule_admin_requires_token_and_lists_versions() -> None:
     assert data["ruleset_versions"]["text"]
     assert data["ruleset_versions"]["url"]
     assert any(rule["name"] == "trust_reassurance" for rule in data["text_rules"])
+
+
+def test_admin_dashboard_requires_token_and_returns_operational_summary() -> None:
+    from app.main import ADMIN_TOKEN
+
+    denied = client.get("/admin/dashboard/summary")
+    assert denied.status_code == 401
+
+    response = client.get(
+        "/admin/dashboard/summary",
+        headers={"x-admin-token": ADMIN_TOKEN},
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["generated_at"]
+    assert data["users"]["total"] >= 0
+    assert {"safe", "suspicious", "high_risk"}.issubset(data["reports"]["verdict_distribution"])
+    assert {"pending", "reviewed", "closed"}.issubset(data["reports"]["status_distribution"])
+    assert data["knowledge"]["scam_count"] >= 14
+    assert data["knowledge"]["sourced_scam_count"] >= 4
+    assert data["rules"]["versions"]["text"]
+    assert data["rules"]["versions"]["url"]
+    assert data["rules"]["enabled_text_rule_count"] <= data["rules"]["text_rule_count"]
+    assert isinstance(data["reports"]["recent"], list)
+    assert isinstance(data["reports"]["top_keywords"], list)
+    assert isinstance(data["scenarios"], list)
 
 
 def test_rule_can_be_disabled_and_hot_reloaded_then_rolled_back() -> None:

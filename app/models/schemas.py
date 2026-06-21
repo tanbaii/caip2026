@@ -40,6 +40,7 @@ class ChatResponse(BaseModel):
     current_danger_level: str = "low"
     scam_likelihood_level: str = "low"
     residual_risk_level: str = "low"
+    privacy_risk_level: str = "low"
     next_actions: list[str] = Field(default_factory=list)
     session_stage: str = "collecting"
     known_facts: dict[str, bool] = Field(default_factory=dict)

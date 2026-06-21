@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import date
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -11,13 +12,21 @@ class GamificationService:
         self.storage = storage
         self._states: dict[int, dict[str, object]] = {}
         self._scenario_records: dict[str, dict[str, object]] = {}
+        self._awarded_events: set[str] = set()
+        self._daily_action_counts: dict[str, int] = {}
         self._action_points = {
             "knowledge_query": 5,
-            "daily_chat": 2,
+            "daily_chat": 1,
             "report_submit": 12,
+            "risk_alert": 5,
             "risk_block": 20,
+            "safety_action_confirmed": 20,
             "scenario_step": 0,
             "scenario_complete": 15,
+        }
+        self._daily_caps = {
+            "daily_chat": 3,
+            "knowledge_query": 5,
         }
 
     @property
@@ -47,8 +56,14 @@ class GamificationService:
         action: str,
         risk_level: str | None = None,
         extra_points: int = 0,
+        event_key: str | None = None,
     ) -> dict[str, object]:
         state = self._ensure_state(user_id)
+        if self._is_duplicate_event(user_id, action, event_key):
+            return self._reward_result(state, 0)
+        if self._is_over_daily_cap(user_id, action):
+            return self._reward_result(state, 0)
+
         base_points = int(self._action_points.get(action, 0))
         gained = base_points + max(0, extra_points)
 
@@ -58,7 +73,7 @@ class GamificationService:
             state["knowledge_queries"] = int(state["knowledge_queries"]) + 1
         if action == "scenario_complete":
             state["scenarios_completed"] = int(state["scenarios_completed"]) + 1
-        if action == "risk_block" and risk_level in {"high", "critical"}:
+        if action in {"risk_block", "safety_action_confirmed"} and risk_level in {"high", "critical"}:
             state["high_risk_blocks"] = int(state["high_risk_blocks"]) + 1
 
         state["points"] = int(state["points"]) + gained
@@ -66,12 +81,9 @@ class GamificationService:
         state["badges"] = self._refresh_badges(state)
         self._persist(user_id, state)
 
-        return {
-            "points_gained": gained,
-            "total_points": int(state["points"]),
-            "level": int(state["level"]),
-            "badges": list(state["badges"]),
-        }
+        self._remember_reward(user_id, action, event_key)
+        self._increment_daily_count(user_id, action)
+        return self._reward_result(state, gained)
 
     def profile(self, user_id: int) -> dict[str, object]:
         state = self._ensure_state(user_id)
@@ -174,3 +186,41 @@ class GamificationService:
     def _persist(self, user_id: int, state: dict[str, object]) -> None:
         if self.storage:
             self.storage.save_user_state(user_id, state)
+
+    def _is_duplicate_event(self, user_id: int, action: str, event_key: str | None) -> bool:
+        if not event_key:
+            return False
+        return self._event_id(user_id, action, event_key) in self._awarded_events
+
+    def _remember_reward(self, user_id: int, action: str, event_key: str | None) -> None:
+        if event_key:
+            self._awarded_events.add(self._event_id(user_id, action, event_key))
+
+    def _is_over_daily_cap(self, user_id: int, action: str) -> bool:
+        cap = self._daily_caps.get(action)
+        if cap is None:
+            return False
+        return self._daily_action_counts.get(self._daily_key(user_id, action), 0) >= cap
+
+    def _increment_daily_count(self, user_id: int, action: str) -> None:
+        if action not in self._daily_caps:
+            return
+        key = self._daily_key(user_id, action)
+        self._daily_action_counts[key] = self._daily_action_counts.get(key, 0) + 1
+
+    @staticmethod
+    def _event_id(user_id: int, action: str, event_key: str) -> str:
+        return f"{user_id}:{action}:{event_key}"
+
+    @staticmethod
+    def _daily_key(user_id: int, action: str) -> str:
+        return f"{date.today().isoformat()}:{user_id}:{action}"
+
+    @staticmethod
+    def _reward_result(state: dict[str, object], gained: int) -> dict[str, object]:
+        return {
+            "points_gained": int(gained),
+            "total_points": int(state["points"]),
+            "level": int(state["level"]),
+            "badges": list(state["badges"]),
+        }

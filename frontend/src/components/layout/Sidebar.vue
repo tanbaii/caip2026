@@ -12,7 +12,7 @@
 
     <nav class="flex min-w-0 flex-1 items-center justify-around gap-1 md:flex-col md:items-stretch md:justify-start md:gap-2">
       <RouterLink
-        v-for="item in navItems"
+        v-for="item in visibleNavItems"
         :key="item.path"
         :to="item.path"
         class="group flex h-11 w-11 items-center justify-center rounded-2xl transition-all md:h-auto md:w-auto md:justify-start md:gap-4 md:px-4 md:py-3"
@@ -42,21 +42,32 @@
 <script setup>
 import { computed } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
-import { BookOpen, Flag, Gamepad2, LogOut, Medal, MessageCircle, Settings2, Shield, User } from 'lucide-vue-next'
+import { BookOpen, Flag, Gamepad2, LayoutDashboard, LogOut, Medal, MessageCircle, Settings2, Shield, User } from 'lucide-vue-next'
+import { useAdminAuth } from '../../composables/useAdminAuth.js'
 import { useAuth } from '../../composables/useAuth.js'
 
 const route = useRoute()
 const router = useRouter()
 const { currentUser, logout } = useAuth()
+const admin = useAdminAuth()
 
-const navItems = [
+const publicNavItems = [
   { icon: MessageCircle, label: 'AI 对话', path: '/chat' },
   { icon: Flag, label: '举报中心', path: '/report' },
   { icon: Gamepad2, label: '反诈闯关', path: '/game' },
   { icon: BookOpen, label: '知识库', path: '/knowledge' },
   { icon: Medal, label: '排行榜 / 等级', path: '/leaderboard' },
+]
+
+const adminNavItems = [
+  { icon: LayoutDashboard, label: '后台看板', path: '/admin/dashboard' },
   { icon: Settings2, label: '规则管理', path: '/admin/rules' },
 ]
+
+const visibleNavItems = computed(() => [
+  ...publicNavItems,
+  ...(admin.isAdminVerified.value ? adminNavItems : []),
+])
 
 const displayName = computed(() => currentUser.value?.nickname || currentUser.value?.username || '未登录用户')
 
@@ -65,6 +76,7 @@ function isActive(path) {
 }
 
 function handleLogout() {
+  admin.clearAdminAccess()
   logout()
   router.push('/login')
 }

@@ -63,8 +63,8 @@ class MergedRiskAssessment:
 class AIRiskAssessor:
     """LLM-assisted risk reviewer.
 
-    The model is advisory only. `merge_rule_and_ai_risk` keeps deterministic
-    rules as the safety floor and only lets confident AI findings escalate.
+    The model is advisory by default. Risk score ownership stays with the
+    deterministic rule/state pipeline unless escalation is explicitly enabled.
     """
 
     def __init__(
@@ -113,11 +113,11 @@ class AIRiskAssessor:
                 "role": "system",
                 "content": (
                     "你是反诈风险复核员，只输出 JSON。"
-                    "任务是判断当前用户是否处于诈骗风险中，并给出0-100风险分。"
+                    "任务是给出辅助复核意见和0-100参考分；最终风险分由规则引擎和状态机决定。"
                     "如果用户说验证码已被看到、账户被接管、钱已转走、正在屏幕共享或远程控制，通常是high或critical。"
                     "如果用户已经报警、银行冻结、断网、卸载远程软件或改密，说明当前实时危险下降，但诈骗可能性和残留风险仍需记录。"
                     "不要安抚，不要写长文，不要给Markdown。"
-                    'JSON字段: risk_level(low|medium|high|critical), risk_score(0-100), '
+                    'JSON字段: risk_level(low|medium|high|critical), risk_score(0-100参考分), '
                     'confidence(0-1), fraud_stage, reasons(array), recommended_actions(array)。'
                 ),
             },
@@ -172,6 +172,8 @@ def merge_rule_and_ai_risk(
     rule_level: str,
     ai_assessment: AIRiskAssessment | None,
     min_confidence: float = 0.55,
+    allow_score_escalation: bool = False,
+    max_escalation_delta: int = 10,
 ) -> MergedRiskAssessment:
     normalized_rule_level = _normalize_level(rule_level)
     if not ai_assessment:
@@ -204,10 +206,24 @@ def merge_rule_and_ai_risk(
             matched_rule=None,
         )
 
-    delta = ai_assessment.risk_score - rule_score
+    if not allow_score_escalation:
+        return MergedRiskAssessment(
+            final_score=rule_score,
+            final_level=normalized_rule_level,
+            ai_score_delta=0,
+            decision="ai_observed",
+            ai_assessment=ai_assessment,
+            matched_rule=None,
+        )
+
+    delta = min(
+        max(0, int(max_escalation_delta)),
+        ai_assessment.risk_score - rule_score,
+    )
+    final_score = rule_score + delta
     return MergedRiskAssessment(
-        final_score=ai_assessment.risk_score,
-        final_level=_score_to_level(ai_assessment.risk_score),
+        final_score=final_score,
+        final_level=_score_to_level(final_score),
         ai_score_delta=delta,
         decision="ai_escalated",
         ai_assessment=ai_assessment,

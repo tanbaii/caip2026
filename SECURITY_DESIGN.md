@@ -56,6 +56,7 @@
 | `/chat`、`/chat/reset`、`/report`、`/scenarios/*` | 默认需要 Bearer Token，且 Token 用户必须与 `user_id` 一致 |
 | `/auth/me` | 需要 `Authorization: Bearer <token>` |
 | `/knowledge/scams`（POST） | 需要 `x-admin-token` 管理员令牌 |
+| `/admin/dashboard/*` | 需要 `x-admin-token` 管理员令牌，用于后台运营看板聚合数据 |
 | `/admin/rules/*` | 需要 `x-admin-token` 管理员令牌，用于规则版本查看、启停、调权、新增和回滚 |
 | `/users/*/progress`、`/users/*/reports` | 默认需要 Bearer Token，并阻止跨用户读取 |
 | `/leaderboard`、知识库只读接口、关卡列表 | 公开只读 |
@@ -71,13 +72,15 @@
 - 管理员令牌通过环境变量 `ANTI_FRAUD_ADMIN_TOKEN` 配置
 - 默认值 `change-me` 仅用于开发，生产环境必须替换
 - 令牌通过请求头 `x-admin-token` 传递，不在 URL 或 Body 中出现
-- Vue 规则管理页只把管理员令牌保存在 `sessionStorage`，关闭浏览器会话后失效
+- Vue 管理端入口 `/admin` 先校验管理员令牌，校验通过后才显示“后台看板”和“规则管理”菜单
+- Vue 管理端只把管理员令牌保存在 `sessionStorage`，关闭浏览器会话后失效
 - 管理接口 401 不会清理普通用户登录态，避免管理员令牌输错导致演示账号退出
 
 ### 3.2 受限操作
 
 - 管理员知识接口：`POST /knowledge/scams`（新增骗局知识条目）
 - 举报复核接口：`PATCH /reports/{report_id}/status`，仅允许管理员更新处理状态
+- 后台看板接口：`/admin/dashboard/*`，只返回运营聚合数据、脱敏举报摘要和 URL host
 - 规则管理接口：`/admin/rules/*`，支持查看版本、启停、调权、新增文本规则和回滚历史快照
 - 令牌不匹配时返回 `401 Unauthorized`
 - 不提供用户管理、真实数据删除等高危管理员功能

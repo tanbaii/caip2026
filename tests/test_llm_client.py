@@ -58,6 +58,8 @@ def test_chat_payload_is_openai_compatible() -> None:
 def test_load_llm_config_accepts_dashscope_api_key(monkeypatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "bailian")
     monkeypatch.setenv("LLM_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1")
+    monkeypatch.delenv("LLM_API_KEY", raising=False)
+    monkeypatch.delenv("BAILIAN_API_KEY", raising=False)
     monkeypatch.setenv("DASHSCOPE_API_KEY", "sk-test")
     monkeypatch.setenv("LLM_MODEL", "qwen-plus")
 
@@ -70,6 +72,8 @@ def test_load_llm_config_accepts_dashscope_api_key(monkeypatch) -> None:
 
 def test_bailian_provider_defaults_do_not_use_ollama_model(monkeypatch) -> None:
     monkeypatch.setenv("LLM_PROVIDER", "bailian")
+    monkeypatch.delenv("LLM_MODEL", raising=False)
+    monkeypatch.delenv("BAILIAN_MODEL", raising=False)
     monkeypatch.setenv("OLLAMA_MODEL", "qwen3-lora")
 
     config = load_llm_config()

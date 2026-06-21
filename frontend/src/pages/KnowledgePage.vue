@@ -15,8 +15,55 @@
         </div>
       </div>
 
+      <div v-if="quality" class="grid gap-3 md:grid-cols-5">
+        <div v-for="item in qualityStats" :key="item.label" class="rounded-2xl border border-slate-100 bg-slate-50 px-4 py-3">
+          <p class="text-xs font-black uppercase tracking-widest text-slate-400">{{ item.label }}</p>
+          <p class="mt-1 text-2xl font-black text-slate-950">{{ item.value }}</p>
+        </div>
+      </div>
+
       <p v-if="error" class="rounded-2xl bg-red-50 px-4 py-3 text-sm font-bold text-red-700 ring-1 ring-red-100">{{ error }}</p>
     </BaseCard>
+
+    <section class="space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-2xl font-black text-slate-950">处置手册</h2>
+        <StatusBadge tone="info">{{ filteredPlaybooks.length }} 条</StatusBadge>
+      </div>
+      <div v-if="!filteredPlaybooks.length" class="soft-card p-8 text-center text-sm font-bold text-slate-400">暂无匹配的处置手册。</div>
+      <div v-else class="grid gap-5 xl:grid-cols-2">
+        <BaseCard v-for="item in filteredPlaybooks" :key="item.id || item.title" padding-class="p-6" class="interactive-card space-y-4">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <p class="text-xs font-black uppercase tracking-widest text-emerald-600">{{ item.stage || item.id || 'PLAYBOOK' }}</p>
+              <h3 class="mt-2 text-xl font-black text-slate-900">{{ item.title || '未命名处置手册' }}</h3>
+            </div>
+            <StatusBadge tone="success">响应策略</StatusBadge>
+          </div>
+          <TagList title="风险焦点" :items="list(item.risk_focus)" tone="info" />
+          <InfoList title="适用条件" :items="list(item.when_to_use)" />
+          <InfoList title="立即动作" :items="list(item.immediate_actions)" />
+          <InfoList title="后续核对" :items="list(item.follow_up_checks)" />
+          <div class="rounded-2xl bg-emerald-50 p-4 text-sm font-semibold leading-7 text-emerald-800">
+            {{ item.tone_guidance || '按当前阶段调整语气，避免机械重复。' }}
+          </div>
+        </BaseCard>
+      </div>
+    </section>
+
+    <section class="space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-2xl font-black text-slate-950">高频追问</h2>
+        <StatusBadge tone="muted">{{ filteredFaqs.length }} 条</StatusBadge>
+      </div>
+      <div v-if="!filteredFaqs.length" class="soft-card p-8 text-center text-sm font-bold text-slate-400">暂无匹配的 FAQ。</div>
+      <div v-else class="grid gap-4 md:grid-cols-2">
+        <BaseCard v-for="item in filteredFaqs" :key="item.id || item.question" padding-class="p-5" class="space-y-3">
+          <h3 class="text-lg font-black text-slate-900">{{ item.question || '未命名问题' }}</h3>
+          <p class="text-sm font-semibold leading-7 text-slate-600">{{ item.answer || '暂无回答。' }}</p>
+        </BaseCard>
+      </div>
+    </section>
 
     <section class="space-y-4">
       <div class="flex items-center justify-between">
@@ -44,6 +91,7 @@
           </div>
           <InfoList title="防护建议" :items="list(item.prevention)" />
           <TagList title="法律依据" :items="list(item.legal_refs)" tone="info" />
+          <SourceList title="权威来源" :items="listSources(item.sources)" />
         </BaseCard>
       </div>
     </section>
@@ -70,7 +118,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
-import { getLaws, getScams } from '../api/knowledge.js'
+import { getFaqs, getKnowledgeQuality, getLaws, getPlaybooks, getScams } from '../api/knowledge.js'
 import BaseCard from '../components/common/BaseCard.vue'
 import StatusBadge from '../components/common/StatusBadge.vue'
 
@@ -78,6 +126,9 @@ const loading = ref(false)
 const error = ref('')
 const scams = ref([])
 const laws = ref([])
+const playbooks = ref([])
+const faqs = ref([])
+const quality = ref(null)
 const keyword = ref('')
 
 const InfoList = {
@@ -106,8 +157,38 @@ const TagList = {
   `,
 }
 
+const SourceList = {
+  props: { title: String, items: { type: Array, default: () => [] } },
+  methods: {
+    safeUrl(source) {
+      const url = source?.url || ''
+      return /^https?:\/\//i.test(url) ? url : ''
+    },
+    label(source) {
+      return [source?.organization, source?.title].filter(Boolean).join(' · ') || source?.url || '来源'
+    },
+  },
+  template: `
+    <section class="space-y-2">
+      <h4 class="text-sm font-black text-slate-900">{{ title }}</h4>
+      <ul v-if="items.length" class="space-y-2">
+        <li v-for="(source,index) in items" :key="index" class="rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-sm font-semibold leading-6 text-emerald-800">
+          <a v-if="safeUrl(source)" :href="safeUrl(source)" target="_blank" rel="noopener noreferrer" class="break-words font-black underline decoration-emerald-300 underline-offset-4">{{ label(source) }}</a>
+          <span v-else class="break-words font-black">{{ label(source) }}</span>
+          <p v-if="source.collected_at" class="mt-1 text-xs font-bold text-emerald-600">采集日期：{{ source.collected_at }}</p>
+        </li>
+      </ul>
+      <p v-else class="rounded-2xl bg-slate-50 p-3 text-sm font-semibold text-slate-400">本条目为本地整理数据，暂无单独来源链接。</p>
+    </section>
+  `,
+}
+
 function list(value) {
   return Array.isArray(value) ? value : []
+}
+
+function listSources(value) {
+  return Array.isArray(value) ? value.filter((item) => item && typeof item === 'object') : []
 }
 
 function matches(item) {
@@ -118,19 +199,43 @@ function matches(item) {
 
 const filteredScams = computed(() => scams.value.filter(matches))
 const filteredLaws = computed(() => laws.value.filter(matches))
+const filteredPlaybooks = computed(() => playbooks.value.filter(matches))
+const filteredFaqs = computed(() => faqs.value.filter(matches))
+const qualityStats = computed(() => {
+  const data = quality.value || {}
+  return [
+    { label: 'Scams', value: data.scam_count ?? scams.value.length },
+    { label: 'Playbooks', value: data.playbook_count ?? playbooks.value.length },
+    { label: 'FAQ', value: data.faq_count ?? faqs.value.length },
+    { label: 'Sources', value: data.sourced_scam_count ?? 0 },
+    { label: 'Version', value: data.schema_version || '-' },
+  ]
+})
 
 async function loadKnowledge() {
   loading.value = true
   error.value = ''
 
   try {
-    const [scamData, lawData] = await Promise.all([getScams(), getLaws()])
+    const [scamData, lawData, playbookData, faqData, qualityData] = await Promise.all([
+      getScams(),
+      getLaws(),
+      getPlaybooks(),
+      getFaqs(),
+      getKnowledgeQuality(),
+    ])
     scams.value = Array.isArray(scamData) ? scamData : []
     laws.value = Array.isArray(lawData) ? lawData : []
+    playbooks.value = Array.isArray(playbookData) ? playbookData : []
+    faqs.value = Array.isArray(faqData) ? faqData : []
+    quality.value = qualityData && typeof qualityData === 'object' ? qualityData : null
   } catch (err) {
     error.value = err.message || '知识库加载失败'
     scams.value = []
     laws.value = []
+    playbooks.value = []
+    faqs.value = []
+    quality.value = null
   } finally {
     loading.value = false
   }

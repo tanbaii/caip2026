@@ -62,6 +62,30 @@
       "expected_rules": ["airline_ticket_refund", "fake_refund_or_compensation", "account_takeover"]
     },
     {
+      "id": "text_hrss_subsidy_phishing",
+      "category": "人社补贴钓鱼",
+      "input": "社保通知说国家人社部补贴申领需要登录人社部官网认证登记，逾期申请视为放弃。",
+      "expected_risky": true,
+      "minimum_level": "medium",
+      "expected_rules": ["hrss_subsidy_phishing"]
+    },
+    {
+      "id": "text_bank_account_abnormal",
+      "category": "银行账户异常认证",
+      "input": "银行短信说我的信用账户触发风控系统，要点击链接核验信息并提供验证码，否则银行卡冻结。",
+      "expected_risky": true,
+      "minimum_level": "medium",
+      "expected_rules": ["bank_account_abnormal_phishing", "account_takeover"]
+    },
+    {
+      "id": "text_exam_admission_fee",
+      "category": "高考招生录取诈骗",
+      "input": "有人自称招生办有补录名额和内部指标，让我先交录取费保证金。",
+      "expected_risky": true,
+      "minimum_level": "high",
+      "expected_rules": ["exam_admission_fraud", "transfer_before_service"]
+    },
+    {
       "id": "text_account_takeover",
       "category": "账户接管",
       "input": "对方让我打开屏幕共享，把短信验证码发给他。",
@@ -108,6 +132,22 @@
       "expected_risky": false,
       "maximum_level": "low",
       "forbidden_rules": ["authority_pressure", "transfer_critical"]
+    },
+    {
+      "id": "text_safe_bank_warning",
+      "category": "安全提醒",
+      "input": "官方提醒：不要点击短信链接，也不要提供验证码。",
+      "expected_risky": false,
+      "maximum_level": "low",
+      "forbidden_rules": ["account_takeover"]
+    },
+    {
+      "id": "text_safe_exam_guidance",
+      "category": "安全提醒",
+      "input": "查分录取请以省招办官网为准，不向私人账户转账。",
+      "expected_risky": false,
+      "maximum_level": "low",
+      "forbidden_rules": ["exam_admission_fraud", "transfer_before_service"]
     },
     {
       "id": "text_safe_refund_channel",
@@ -173,6 +213,22 @@
       "expected_risky": true,
       "minimum_level": "high",
       "expected_rules": ["subdomain_disguise", "domain_impersonation"]
+    },
+    {
+      "id": "url_hrss_subdomain_disguise",
+      "category": "人社域名仿冒",
+      "input": "https://mohrss.gov.cn.evil.top/subsidy",
+      "expected_risky": true,
+      "minimum_level": "high",
+      "expected_rules": ["subdomain_disguise", "domain_impersonation"]
+    },
+    {
+      "id": "url_official_hrss",
+      "category": "官方白名单",
+      "input": "https://www.mohrss.gov.cn/",
+      "expected_risky": false,
+      "maximum_level": "low",
+      "expected_rules": ["domain_whitelist"]
     },
     {
       "id": "url_airline_typo",

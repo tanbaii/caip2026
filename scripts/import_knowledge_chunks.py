@@ -40,6 +40,11 @@ def build_chunks(data: dict[str, Any]) -> list[dict[str, Any]]:
         scam_type = str(scam.get("type", ""))
         name = str(scam.get("name", scam_type or source_id))
         keywords = _as_list(scam.get("keywords"))
+        sources = [
+            f"{item.get('organization', '')}《{item.get('title', '')}》{item.get('url', '')}".strip()
+            for item in scam.get("sources", [])
+            if isinstance(item, dict)
+        ]
 
         sections = [
             ("overview", "典型案例", _as_list(scam.get("typical_case"))),
@@ -55,6 +60,7 @@ def build_chunks(data: dict[str, Any]) -> list[dict[str, Any]]:
                 _join_section("关键词", keywords),
                 _join_section(label, values),
                 _join_section("法律参考", _as_list(scam.get("legal_refs"))),
+                _join_section("来源", sources),
             ]
             content = "\n".join(part for part in content_parts if part)
             if not content.strip():
@@ -92,6 +98,60 @@ def build_chunks(data: dict[str, Any]) -> list[dict[str, Any]]:
                     "content": content,
                     "keywords": [],
                     "metadata": {"chunk_kind": "law_highlight"},
+                }
+            )
+
+    for playbook in data.get("response_playbooks", []):
+        if not isinstance(playbook, dict):
+            continue
+        source_id = str(playbook.get("id", ""))
+        title = str(playbook.get("title", source_id or "response playbook"))
+        stage = str(playbook.get("stage", ""))
+        risk_focus = _as_list(playbook.get("risk_focus"))
+        content = "\n".join(
+            part
+            for part in [
+                f"处置阶段: {stage}",
+                f"处置手册: {title}",
+                _join_section("风险焦点", risk_focus),
+                _join_section("适用条件", _as_list(playbook.get("when_to_use"))),
+                _join_section("立即动作", _as_list(playbook.get("immediate_actions"))),
+                _join_section("后续核对", _as_list(playbook.get("follow_up_checks"))),
+                _join_section("语气要求", _as_list(playbook.get("tone_guidance"))),
+                _join_section("升级渠道", _as_list(playbook.get("escalation_channels"))),
+            ]
+            if part
+        )
+        if content.strip():
+            chunks.append(
+                {
+                    "source_type": "response_playbook",
+                    "source_id": source_id,
+                    "scam_type": None,
+                    "title": title,
+                    "content": content,
+                    "keywords": risk_focus,
+                    "metadata": {"chunk_kind": "response_playbook", "stage": stage},
+                }
+            )
+
+    for faq in data.get("faqs", []):
+        if not isinstance(faq, dict):
+            continue
+        source_id = str(faq.get("id", ""))
+        question = str(faq.get("question", source_id or "FAQ"))
+        answer = str(faq.get("answer", ""))
+        content = "\n".join(part for part in [f"问题: {question}", f"回答: {answer}"] if part)
+        if content.strip():
+            chunks.append(
+                {
+                    "source_type": "faq",
+                    "source_id": source_id,
+                    "scam_type": None,
+                    "title": question,
+                    "content": content,
+                    "keywords": [],
+                    "metadata": {"chunk_kind": "faq"},
                 }
             )
 

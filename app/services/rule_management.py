@@ -20,6 +20,18 @@ class RuleManagementService:
     def _bootstrap(self) -> None:
         active = self.storage.get_active_rule_version()
         if active:
+            repo_risk_cfg, repo_url_cfg = self.risk_engine.export_configs()
+            if self._should_sync_repository_config(active):
+                self.storage.create_rule_version(
+                    action="sync",
+                    change_summary="同步仓库规则配置更新",
+                    text_version=self.risk_engine.risk_ruleset_version,
+                    url_version=self.risk_engine.url_ruleset_version,
+                    risk_config=repo_risk_cfg,
+                    url_config=repo_url_cfg,
+                    source_version_id=active["id"],
+                )
+                return
             self.risk_engine.apply_configs(active["risk_config"], active["url_config"])
             return
         risk_cfg, url_cfg = self.risk_engine.export_configs()
@@ -146,6 +158,24 @@ class RuleManagementService:
                 self.risk_engine.apply_configs(previous["risk_config"], previous["url_config"])
             raise
         return self.overview()
+
+    def _should_sync_repository_config(self, active: dict[str, Any]) -> bool:
+        repository_managed = str(active.get("action", "")) in {"bootstrap", "sync"}
+        if not repository_managed:
+            return False
+        return (
+            self._version_tuple(self.risk_engine.risk_ruleset_version)
+            > self._version_tuple(active.get("text_version", ""))
+            or self._version_tuple(self.risk_engine.url_ruleset_version)
+            > self._version_tuple(active.get("url_version", ""))
+        )
+
+    @staticmethod
+    def _version_tuple(version: object) -> tuple[int, int, int]:
+        match = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", str(version))
+        if not match:
+            return (0, 0, 0)
+        return tuple(int(value) for value in match.groups())
 
     @staticmethod
     def _select_rules(

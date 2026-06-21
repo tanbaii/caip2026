@@ -310,6 +310,21 @@ def list_laws() -> list[dict[str, object]]:
     return knowledge_base.laws
 
 
+@app.get("/knowledge/playbooks")
+def list_response_playbooks() -> list[dict[str, object]]:
+    return knowledge_base.response_playbooks
+
+
+@app.get("/knowledge/faqs")
+def list_faqs() -> list[dict[str, object]]:
+    return knowledge_base.faqs
+
+
+@app.get("/knowledge/quality")
+def knowledge_quality() -> dict[str, object]:
+    return knowledge_base.quality_report()
+
+
 @app.post("/knowledge/scams")
 def add_scam(
     entry: ScamEntryCreate,

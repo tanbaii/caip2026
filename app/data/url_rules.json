@@ -1,14 +1,15 @@
 {
   "_meta": {
-    "version": "2.2.0",
-    "updated": "2026-06-14",
+    "version": "2.3.0",
+    "updated": "2026-06-17",
     "changelog": {
+      "2.3.0": "接入12321/12377来源，补充人社、苹果、农业银行、平安银行等高频仿冒品牌域名，并扩展官方白名单",
       "2.2.0": "将已确认的打字抢注域名提升到中风险阈值，修复规则命中但界面仍显示低风险的问题",
       "2.1.0": "修复白名单后缀绕过，统一域名规范化，补强品牌词、相邻字符交换与子域名仿冒检测",
       "2.0.0": "新增域名仿冒检测（域名变形、子域名伪装、关键词仿冒）；新增白名单规则；规则增加版本号与解释依据",
       "1.0.0": "初始版本，涵盖短链、高风险TLD、IP直连、@符号、Punycode等基础检测"
     },
-    "rationale": "规则依据《反电信网络诈骗法》关于互联网平台反诈义务、OWASP Top 10 Web安全威胁分类、PhishTank域名分类标准"
+    "rationale": "规则依据《反电信网络诈骗法》关于互联网平台反诈义务、OWASP Top 10 Web安全威胁分类、PhishTank域名分类标准，以及12321钓鱼网站投诉TOP10和12377仿冒网站举报须知"
   },
   "shortener_domains": [
     "t.cn", "bit.ly", "tinyurl.com", "dwz.cn", "is.gd",
@@ -21,7 +22,8 @@
   ],
   "whitelist_domains": [
     "gov.cn", "edu.cn", "ac.cn", "mil.cn",
-    "12321.cn", "nic.edu.cn"
+    "12321.cn", "12377.cn", "nic.edu.cn",
+    "mohrss.gov.cn", "12333.gov.cn"
   ],
   "whitelist_note": "仅主域名本身或其真实子域名可命中白名单；evilgov.cn 等字符串后缀不命中。白名单只跳过域名结构加分，页面内容仍需独立研判",
   "impersonation_patterns": {
@@ -37,6 +39,11 @@
       "ccb.com": "建设银行",
       "cmbchina.com": "招商银行",
       "boc.cn": "中国银行",
+      "abchina.com": "农业银行",
+      "pingan.com": "平安银行",
+      "apple.com": "Apple",
+      "mohrss.gov.cn": "人力资源和社会保障部",
+      "12333.gov.cn": "全国人社政务服务平台",
       "airchina.com.cn": "中国国航",
       "ceair.com": "东方航空",
       "csair.com": "南方航空",

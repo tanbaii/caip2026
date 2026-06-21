@@ -9,9 +9,13 @@ from app.services.dialogue_service import (
     _build_conversation_summary,
     _is_new_explicit_scam_topic,
     _last_history_score,
+    _max_history_risk_level,
+    _max_level,
+    _reward_event_key,
     _top_scam_type,
 )
 from app.services.conversation_state import has_closure_action_taken, has_safety_action_taken
+from app.services.conversation_state import is_deescalation_context
 from app.services.risk_dimensions import build_risk_dimensions, overall_level_from_dimensions
 from app.services.sanitizer import sanitize_text
 
@@ -225,18 +229,41 @@ class ChatWorkflowRunner:
             risk_level = self.service.risk_engine._score_to_level(total_score)
             conv_data = self.service._conv_state.recompute_stage(request.user_id, risk_level)
 
+        (
+            total_score,
+            risk_level,
+            intervention_script,
+            recommendations,
+            breakdown,
+            all_matched_rules,
+            conv_data,
+        ) = self.service._apply_evidence_risk_adjustments(
+            request.user_id,
+            total_score,
+            risk_level,
+            breakdown,
+            all_matched_rules,
+            conv_data,
+            request.user_profile.role,
+        )
+
         previous_score = _last_history_score(state["history"])
         if (
             previous_score is not None
             and previous_score > total_score
             and not has_safety_action_taken(conv_data)
             and not has_closure_action_taken(conv_data)
+            and not is_deescalation_context(conv_data)
         ):
             total_score = previous_score
             breakdown["context_score_floor"] = previous_score
             breakdown["total"] = total_score
             risk_level = self.service.risk_engine._score_to_level(total_score)
             conv_data = self.service._conv_state.recompute_stage(request.user_id, risk_level)
+            intervention_script = self.service.risk_engine._build_intervention(
+                risk_level, request.user_profile.role
+            )
+            recommendations = self.service.risk_engine._build_recommendations(risk_level)
 
         (
             total_score,
@@ -254,6 +281,24 @@ class ChatWorkflowRunner:
             breakdown=breakdown,
             all_matched_rules=all_matched_rules,
             conv_data=conv_data,
+        )
+
+        (
+            total_score,
+            risk_level,
+            intervention_script,
+            recommendations,
+            breakdown,
+            all_matched_rules,
+            conv_data,
+        ) = self.service._apply_evidence_risk_adjustments(
+            request.user_id,
+            total_score,
+            risk_level,
+            breakdown,
+            all_matched_rules,
+            conv_data,
+            request.user_profile.role,
         )
 
         return {
@@ -284,11 +329,12 @@ class ChatWorkflowRunner:
             matched_scams=state["matched_scams"],
             risk_level=state["risk_level"],
             user_role=request.user_profile.role,
-            stage="warning",
+            stage=conv_data["session_stage"],
             pending_questions=[],
             known_facts=conv_data["known_facts"],
             turn_count=conv_data["turn_count"],
             risk_dimensions=state["risk_dimensions"],
+            pii_memory=conv_data.get("pii_memory", {}),
         )
         if self.service.rag_reply_generator:
             reply = self.service.rag_reply_generator.generate(
@@ -328,6 +374,7 @@ class ChatWorkflowRunner:
             known_facts=conv_data["known_facts"],
             turn_count=conv_data["turn_count"],
             risk_dimensions=state["risk_dimensions"],
+            pii_memory=conv_data.get("pii_memory", {}),
         )
 
         if self.service.rag_reply_generator:
@@ -356,17 +403,30 @@ class ChatWorkflowRunner:
         risk_level = state["risk_level"]
         intent = state["intent"]
         current_action_level = overall_level_from_dimensions(state["risk_dimensions"])
+        conv_data = state["conv_data"]
+        event_key = _reward_event_key(
+            conv_data=conv_data,
+            risk_level=risk_level,
+            current_scam_type=state["current_scam_type"],
+        )
 
         action = "daily_chat"
         if current_action_level in {"high", "critical"}:
-            action = "risk_block"
+            action = "risk_alert"
+        if has_closure_action_taken(conv_data):
+            action = "safety_action_confirmed"
         elif intent in {"ask_knowledge", "report_content"}:
             action = "knowledge_query"
+
+        reward_risk_level = risk_level
+        if action == "safety_action_confirmed":
+            reward_risk_level = _max_level(risk_level, _max_history_risk_level(state["history"]))
 
         reward = self.service.gamification.award(
             request.user_id,
             action=action,
-            risk_level=risk_level,
+            risk_level=reward_risk_level,
+            event_key=event_key,
         )
 
         new_history = state["history"] + [
@@ -421,6 +481,7 @@ class ChatWorkflowRunner:
                 "current_danger_level": str(state["risk_dimensions"]["current_danger"]["level"]),
                 "scam_likelihood_level": str(state["risk_dimensions"]["scam_likelihood"]["level"]),
                 "residual_risk_level": str(state["risk_dimensions"]["residual_risk"]["level"]),
+                "privacy_risk_level": str(state["risk_dimensions"]["privacy_risk"]["level"]),
                 "next_actions": _build_chat_next_actions(overall_level_from_dimensions(state["risk_dimensions"])),
                 "session_stage": conv_data["session_stage"],
                 "known_facts": conv_data["known_facts"],

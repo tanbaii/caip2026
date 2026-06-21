@@ -7,8 +7,11 @@ import GamePage from '../pages/GamePage.vue'
 import KnowledgePage from '../pages/KnowledgePage.vue'
 import LeaderboardPage from '../pages/LeaderboardPage.vue'
 import ProfilePage from '../pages/ProfilePage.vue'
+import AdminAccessPage from '../pages/AdminAccessPage.vue'
+import AdminDashboardPage from '../pages/AdminDashboardPage.vue'
 import RuleAdminPage from '../pages/RuleAdminPage.vue'
 import { useAuth } from '../composables/useAuth.js'
+import { hasAdminAccess } from '../composables/useAdminAuth.js'
 
 const router = createRouter({
   history: createWebHistory(),
@@ -26,7 +29,9 @@ const router = createRouter({
         { path: 'knowledge', component: KnowledgePage },
         { path: 'leaderboard', component: LeaderboardPage },
         { path: 'profile', component: ProfilePage },
-        { path: 'admin/rules', component: RuleAdminPage },
+        { path: 'admin', component: AdminAccessPage },
+        { path: 'admin/dashboard', component: AdminDashboardPage, meta: { requiresAdmin: true } },
+        { path: 'admin/rules', component: RuleAdminPage, meta: { requiresAdmin: true } },
       ],
     },
   ],
@@ -43,6 +48,10 @@ router.beforeEach(async (to) => {
 
   if (to.meta.requiresAuth && !auth.isAuthenticated.value) {
     return '/login'
+  }
+
+  if (to.meta.requiresAdmin && !hasAdminAccess()) {
+    return { path: '/admin', query: { redirect: to.fullPath } }
   }
 
   if (to.path === '/login' && auth.isAuthenticated.value) {

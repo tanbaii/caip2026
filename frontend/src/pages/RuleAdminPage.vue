@@ -122,9 +122,10 @@
 import { computed, reactive, ref } from 'vue'
 import { Settings2 } from 'lucide-vue-next'
 import { createTextRule, getRuleHistory, getRuleOverview, rollbackRuleVersion, updateRule } from '../api/rules.js'
+import { useAdminAuth } from '../composables/useAdminAuth.js'
 
-const TOKEN_KEY = 'anti_fraud_admin_token'
-const adminToken = ref(sessionStorage.getItem(TOKEN_KEY) || '')
+const admin = useAdminAuth()
+const adminToken = admin.adminToken
 const overview = ref(null)
 const history = ref([])
 const loading = ref(false)
@@ -155,13 +156,16 @@ async function loadAll() {
     history.value = historyData
     syncDrafts()
   } catch (error) {
+    if (error.status === 401) {
+      admin.clearAdminAccess()
+    }
     overview.value = null
     notify(error.message || '规则管理接口连接失败', 'error')
   } finally { loading.value = false }
 }
 
 async function connect() {
-  sessionStorage.setItem(TOKEN_KEY, adminToken.value)
+  admin.setAdminToken(adminToken.value)
   await loadAll()
   if (overview.value) notify('管理接口已连接，规则状态为实时数据')
 }
