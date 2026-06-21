@@ -47,6 +47,7 @@ from app.services.gamification import GamificationService
 from app.services.intent_recognizer import IntentRecognizer
 from app.services.knowledge_base import KnowledgeBase
 from app.services.knowledge_retriever import KnowledgeRetriever
+from app.services.hybrid_retriever import HybridRetriever
 from app.services.report_service import ReportService
 from app.services.rag_reply_service import RagReplyGenerator
 from app.services.risk_engine import RiskEngine
@@ -111,6 +112,7 @@ knowledge_retriever = (
     if RAG_RETRIEVAL_ENABLED
     else None
 )
+hybrid_retriever = HybridRetriever(dense_retriever=knowledge_retriever)
 rag_reply_generator = (
     RagReplyGenerator()
     if (
@@ -126,6 +128,7 @@ dialogue_service = DialogueService(
     risk_engine=risk_engine,
     gamification=gamification_service,
     knowledge_retriever=knowledge_retriever,
+    hybrid_retriever=hybrid_retriever,
     rag_reply_generator=rag_reply_generator,
     ai_risk_assessor=ai_risk_assessor,
     storage=storage,
@@ -213,10 +216,17 @@ def health() -> dict[str, str]:
 
 @app.get("/health/rag")
 def rag_health() -> dict[str, object]:
-    return KnowledgeRetriever.health_from_env(
+    health = KnowledgeRetriever.health_from_env(
         knowledge_retriever,
         enabled=RAG_RETRIEVAL_ENABLED,
     )
+    health["hybrid"] = {
+        "configured": hybrid_retriever is not None,
+        "bm25_index": hybrid_retriever is not None and hybrid_retriever.bm25_index is not None,
+        "bm25_docs": len(hybrid_retriever.bm25_index.corpus) if hybrid_retriever is not None and hybrid_retriever.bm25_index is not None else 0,
+        "reranker_enabled": os.getenv("RAG_RERANK_ENABLED", "0").lower() in {"1", "true", "yes"},
+    }
+    return health
 
 
 def _resolve_user(

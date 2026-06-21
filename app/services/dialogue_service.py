@@ -31,6 +31,7 @@ class DialogueService:
         gamification: GamificationService,
         knowledge_retriever: Any | None = None,
         rag_reply_generator: Any | None = None,
+        hybrid_retriever: Any | None = None,
         ai_risk_assessor: AIRiskAssessor | None = None,
         storage: Any | None = None,
     ) -> None:
@@ -39,6 +40,7 @@ class DialogueService:
         self.risk_engine = risk_engine
         self.gamification = gamification
         self.knowledge_retriever = knowledge_retriever
+        self.hybrid_retriever = hybrid_retriever
         self.rag_reply_generator = rag_reply_generator
         self.ai_risk_assessor = ai_risk_assessor
         self.storage = storage
@@ -320,6 +322,17 @@ class DialogueService:
             return
 
     def _retrieve_knowledge(self, message: str) -> list[dict[str, Any]]:
+        # Prefer hybrid retriever (Dense + BM25 + RRF)
+        if self.hybrid_retriever is not None:
+            try:
+                return list(self.hybrid_retriever.retrieve(
+                    message,
+                    top_k=int(os.getenv("RAG_TOP_K", "5")),
+                    use_reranker=os.getenv("RAG_RERANK_ENABLED", "0").lower() in {"1", "true", "yes"},
+                ))
+            except Exception:
+                pass
+        # Fallback to dense-only retriever
         if not self.knowledge_retriever:
             return []
         try:
