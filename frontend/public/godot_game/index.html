@@ -1,0 +1,1691 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>诈骗拦截大作战</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --ink: #17202a;
+        --paper: #fff8ea;
+        --amber: #ffb84d;
+        --mint: #61d394;
+        --red: #ff6868;
+        --blue: #3e8cff;
+        --violet: #7b61ff;
+        --line: rgba(255, 255, 255, 0.18);
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      html,
+      body {
+        min-height: 100%;
+        margin: 0;
+      }
+
+      body {
+        overflow: hidden;
+        background:
+          linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px) 0 0 / 48px 48px,
+          linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px) 0 0 / 48px 48px,
+          radial-gradient(circle at 18% 12%, rgba(255, 184, 77, 0.22), transparent 34%),
+          radial-gradient(circle at 84% 24%, rgba(97, 211, 148, 0.2), transparent 32%),
+          linear-gradient(135deg, #111827 0%, #251a2f 48%, #102c38 100%);
+        color: #f9fafb;
+        font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", sans-serif;
+      }
+
+      button {
+        font: inherit;
+      }
+
+      .game {
+        display: grid;
+        grid-template-rows: auto 1fr auto;
+        min-height: 100vh;
+        padding: clamp(16px, 3vw, 28px);
+        gap: 16px;
+      }
+
+      .hud {
+        display: grid;
+        grid-template-columns: minmax(180px, 1fr) repeat(4, minmax(84px, 132px));
+        gap: 10px;
+        align-items: stretch;
+      }
+
+      .brand,
+      .metric,
+      .feed,
+      .panel,
+      .card-stack {
+        border: 1px solid var(--line);
+        background: rgba(13, 19, 31, 0.72);
+        box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+        backdrop-filter: blur(14px);
+      }
+
+      .brand,
+      .metric {
+        min-height: 76px;
+        border-radius: 8px;
+        padding: 14px;
+      }
+
+      .brand {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        background: linear-gradient(135deg, rgba(255, 184, 77, 0.2), rgba(62, 140, 255, 0.13));
+      }
+
+      .kicker,
+      .metric span,
+      .label {
+        color: rgba(255, 255, 255, 0.64);
+        font-size: 11px;
+        font-weight: 900;
+        letter-spacing: 0;
+        text-transform: uppercase;
+      }
+
+      h1,
+      h2,
+      p {
+        margin: 0;
+      }
+
+      h1 {
+        margin-top: 4px;
+        font-size: clamp(24px, 3vw, 36px);
+        line-height: 1;
+      }
+
+      .metric strong {
+        display: block;
+        margin-top: 6px;
+        font-size: clamp(22px, 3vw, 34px);
+        line-height: 1;
+      }
+
+      .arena {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(260px, 340px);
+        min-height: 0;
+        gap: 16px;
+      }
+
+      .card-stack {
+        position: relative;
+        display: grid;
+        place-items: center;
+        overflow: hidden;
+        min-height: 430px;
+        border-radius: 8px;
+        padding: clamp(18px, 4vw, 38px);
+      }
+
+      .card-stack::before,
+      .card-stack::after {
+        position: absolute;
+        width: 72%;
+        max-width: 760px;
+        min-height: 58%;
+        content: "";
+        border: 2px solid rgba(255, 255, 255, 0.08);
+        border-radius: 8px;
+        transform: rotate(-4deg) translateY(16px);
+      }
+
+      .card-stack::after {
+        width: 66%;
+        min-height: 52%;
+        transform: rotate(4deg) translateY(30px);
+      }
+
+      .case-card {
+        position: relative;
+        z-index: 1;
+        width: min(760px, 100%);
+        min-height: 360px;
+        border: 3px solid #121826;
+        border-radius: 8px;
+        background: var(--paper);
+        color: var(--ink);
+        box-shadow: 10px 10px 0 rgba(0, 0, 0, 0.35);
+        padding: clamp(20px, 4vw, 38px);
+        transition: transform 180ms ease, opacity 180ms ease;
+      }
+
+      .case-card.bump {
+        transform: translateY(-8px) rotate(-1deg);
+      }
+
+      .case-card.correct {
+        border-color: #15a46a;
+        box-shadow: 0 0 0 8px rgba(97, 211, 148, 0.16), 10px 10px 0 rgba(0, 0, 0, 0.35);
+        animation: card-pop 360ms ease;
+      }
+
+      .case-card.wrong {
+        border-color: #d93939;
+        box-shadow: 0 0 0 8px rgba(255, 104, 104, 0.18), 10px 10px 0 rgba(0, 0, 0, 0.35);
+        animation: card-wrong 360ms ease;
+      }
+
+      .case-top {
+        display: flex;
+        justify-content: space-between;
+        gap: 18px;
+        align-items: flex-start;
+        padding-bottom: 16px;
+        border-bottom: 2px solid rgba(23, 32, 42, 0.16);
+      }
+
+      .case-type {
+        color: #365fcb;
+        font-weight: 900;
+        font-size: 13px;
+      }
+
+      .risk-tag {
+        min-width: 92px;
+        border-radius: 999px;
+        padding: 7px 10px;
+        color: #fff;
+        text-align: center;
+        font-size: 12px;
+        font-weight: 900;
+        background: var(--violet);
+      }
+
+      .risk-tag.high {
+        background: #d93939;
+      }
+
+      .risk-tag.safe {
+        background: #188453;
+      }
+
+      .message {
+        margin-top: 24px;
+        font-size: clamp(24px, 4.2vw, 48px);
+        font-weight: 900;
+        line-height: 1.12;
+      }
+
+      .details {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        margin-top: 26px;
+      }
+
+      .detail {
+        min-height: 82px;
+        border: 2px solid rgba(23, 32, 42, 0.14);
+        border-radius: 8px;
+        padding: 12px;
+        background: rgba(255, 255, 255, 0.52);
+      }
+
+      .detail strong {
+        display: block;
+        margin-top: 8px;
+        font-size: 17px;
+      }
+
+      .panel {
+        display: flex;
+        flex-direction: column;
+        min-height: 430px;
+        border-radius: 8px;
+        padding: 16px;
+        gap: 12px;
+      }
+
+      .panel h2 {
+        font-size: 21px;
+      }
+
+      .signal-list {
+        display: grid;
+        gap: 8px;
+      }
+
+      .signal {
+        display: flex;
+        min-height: 44px;
+        align-items: center;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        border-radius: 8px;
+        padding: 10px;
+        color: rgba(255, 255, 255, 0.82);
+        background: rgba(255, 255, 255, 0.06);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .verdict {
+        flex: 1;
+        min-height: 112px;
+        border: 1px dashed rgba(255, 255, 255, 0.22);
+        border-radius: 8px;
+        padding: 12px;
+        color: rgba(255, 255, 255, 0.82);
+        line-height: 1.7;
+      }
+
+      .verdict.correct {
+        border-color: rgba(97, 211, 148, 0.58);
+        background: rgba(97, 211, 148, 0.12);
+        color: #d8ffe7;
+      }
+
+      .verdict.wrong {
+        border-color: rgba(255, 104, 104, 0.58);
+        background: rgba(255, 104, 104, 0.12);
+        color: #ffe3e3;
+      }
+
+      .controls {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 12px;
+      }
+
+      .action {
+        min-height: 72px;
+        border: 0;
+        border-radius: 8px;
+        color: #101827;
+        cursor: pointer;
+        font-size: clamp(18px, 2.5vw, 28px);
+        font-weight: 900;
+        box-shadow: 0 8px 0 rgba(0, 0, 0, 0.32);
+        transition: transform 120ms ease, box-shadow 120ms ease, filter 120ms ease;
+      }
+
+      .action:hover,
+      .action:focus-visible {
+        filter: brightness(1.06);
+        outline: none;
+        transform: translateY(-2px);
+      }
+
+      .action:active {
+        box-shadow: 0 3px 0 rgba(0, 0, 0, 0.32);
+        transform: translateY(5px);
+      }
+
+      .intercept {
+        background: var(--red);
+      }
+
+      .allow {
+        background: var(--mint);
+      }
+
+      .feed {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        min-height: 70px;
+        border-radius: 8px;
+        padding: 14px 16px;
+        gap: 16px;
+        align-items: center;
+      }
+
+      .combo-bar {
+        height: 12px;
+        overflow: hidden;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.12);
+      }
+
+      .combo-fill {
+        width: 0%;
+        height: 100%;
+        background: linear-gradient(90deg, var(--amber), var(--mint), var(--blue));
+        transition: width 220ms ease;
+      }
+
+      .restart {
+        min-width: 112px;
+        min-height: 42px;
+        border: 1px solid rgba(255, 255, 255, 0.22);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.1);
+        color: #fff;
+        cursor: pointer;
+        font-weight: 900;
+      }
+
+      .feedback-burst,
+      .float-score {
+        position: absolute;
+        left: 50%;
+        z-index: 4;
+        pointer-events: none;
+        opacity: 0;
+        transform: translate(-50%, -50%) scale(0.82);
+        text-align: center;
+      }
+
+      .feedback-burst {
+        top: 45%;
+        width: min(90%, 720px);
+        color: #fff;
+        font-size: clamp(42px, 9vw, 116px);
+        font-weight: 900;
+        line-height: 0.92;
+        text-shadow: 0 8px 0 rgba(0, 0, 0, 0.35), 0 0 34px rgba(255, 255, 255, 0.25);
+      }
+
+      .feedback-burst.correct {
+        color: #8cffb9;
+      }
+
+      .feedback-burst.wrong {
+        color: #ff8a8a;
+      }
+
+      .feedback-burst.show {
+        animation: burst-pop 820ms ease both;
+      }
+
+      .float-score {
+        top: 26%;
+        border-radius: 999px;
+        padding: 8px 18px;
+        background: rgba(17, 24, 39, 0.86);
+        color: #fff;
+        font-size: clamp(24px, 4vw, 44px);
+        font-weight: 900;
+        box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28);
+      }
+
+      .float-score.show {
+        animation: score-rise 880ms ease both;
+      }
+
+      .float-score.correct {
+        color: #91ffc0;
+      }
+
+      .float-score.wrong {
+        color: #ff9a9a;
+      }
+
+      .settlement {
+        position: fixed;
+        inset: 0;
+        z-index: 10;
+        display: grid;
+        place-items: center;
+        padding: 22px;
+        background: rgba(5, 10, 20, 0.78);
+        backdrop-filter: blur(16px);
+      }
+
+      .settlement[hidden] {
+        display: none;
+      }
+
+      .settlement-card {
+        width: min(760px, 100%);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 8px;
+        background:
+          linear-gradient(135deg, rgba(255, 184, 77, 0.16), transparent 32%),
+          linear-gradient(225deg, rgba(97, 211, 148, 0.16), transparent 30%),
+          rgba(13, 19, 31, 0.96);
+        box-shadow: 0 28px 80px rgba(0, 0, 0, 0.45);
+        padding: clamp(22px, 4vw, 38px);
+        animation: settle-in 360ms ease both;
+      }
+
+      .settlement-title {
+        margin-top: 8px;
+        font-size: clamp(34px, 7vw, 76px);
+        font-weight: 900;
+        line-height: 0.95;
+      }
+
+      .settlement-copy {
+        margin-top: 14px;
+        color: rgba(255, 255, 255, 0.74);
+        font-size: 16px;
+        font-weight: 700;
+        line-height: 1.7;
+      }
+
+      .settlement-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 12px;
+        margin-top: 24px;
+      }
+
+      .settlement-metric {
+        min-height: 104px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 8px;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.07);
+      }
+
+      .settlement-metric strong {
+        display: block;
+        margin-top: 8px;
+        font-size: clamp(28px, 5vw, 48px);
+        line-height: 1;
+      }
+
+      .leaderboard {
+        margin-top: 24px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.06);
+        padding: 14px;
+      }
+
+      .leaderboard-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+      }
+
+      .leaderboard-list {
+        display: grid;
+        gap: 8px;
+        margin-top: 12px;
+      }
+
+      .leaderboard-row {
+        display: grid;
+        grid-template-columns: 48px minmax(0, 1fr) auto;
+        min-height: 44px;
+        align-items: center;
+        gap: 12px;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        border-radius: 8px;
+        padding: 8px 10px;
+        background: rgba(255, 255, 255, 0.06);
+      }
+
+      .leaderboard-row.current {
+        border-color: rgba(255, 184, 77, 0.7);
+        background: rgba(255, 184, 77, 0.14);
+      }
+
+      .leaderboard-rank {
+        color: var(--amber);
+        font-size: 18px;
+        font-weight: 900;
+      }
+
+      .leaderboard-score {
+        color: #fff;
+        font-size: 20px;
+        font-weight: 900;
+      }
+
+      .leaderboard-meta {
+        color: rgba(255, 255, 255, 0.62);
+        font-size: 12px;
+        font-weight: 700;
+      }
+
+      .leaderboard-empty {
+        margin-top: 12px;
+        border: 1px dashed rgba(255, 255, 255, 0.18);
+        border-radius: 8px;
+        padding: 12px;
+        color: rgba(255, 255, 255, 0.64);
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .start-screen {
+        position: fixed;
+        inset: 0;
+        z-index: 9;
+        display: grid;
+        place-items: center;
+        padding: 22px;
+        background:
+          radial-gradient(circle at 22% 18%, rgba(255, 184, 77, 0.18), transparent 34%),
+          radial-gradient(circle at 80% 20%, rgba(62, 140, 255, 0.2), transparent 32%),
+          rgba(5, 10, 20, 0.88);
+        backdrop-filter: blur(16px);
+      }
+
+      .start-screen[hidden] {
+        display: none;
+      }
+
+      .start-card {
+        display: grid;
+        grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.75fr);
+        width: min(980px, 100%);
+        gap: 18px;
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        border-radius: 8px;
+        background:
+          linear-gradient(135deg, rgba(255, 184, 77, 0.16), transparent 28%),
+          linear-gradient(225deg, rgba(97, 211, 148, 0.13), transparent 28%),
+          rgba(13, 19, 31, 0.96);
+        box-shadow: 0 28px 80px rgba(0, 0, 0, 0.45);
+        padding: clamp(22px, 4vw, 38px);
+        animation: settle-in 360ms ease both;
+      }
+
+      .start-title {
+        margin-top: 10px;
+        font-size: clamp(44px, 8vw, 96px);
+        font-weight: 900;
+        line-height: 0.9;
+      }
+
+      .start-copy {
+        margin-top: 18px;
+        color: rgba(255, 255, 255, 0.72);
+        font-size: 16px;
+        font-weight: 700;
+        line-height: 1.8;
+      }
+
+      .start-stats {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 12px;
+        margin-top: 24px;
+      }
+
+      .start-stat {
+        min-height: 104px;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 8px;
+        padding: 14px;
+        background: rgba(255, 255, 255, 0.07);
+      }
+
+      .start-stat strong {
+        display: block;
+        margin-top: 8px;
+        color: #fff;
+        font-size: clamp(30px, 6vw, 58px);
+        line-height: 1;
+      }
+
+      .start-button {
+        min-height: 64px;
+        margin-top: 24px;
+        border: 0;
+        border-radius: 8px;
+        padding: 0 26px;
+        background: var(--amber);
+        color: #111827;
+        cursor: pointer;
+        font-size: 22px;
+        font-weight: 900;
+        box-shadow: 0 10px 0 rgba(0, 0, 0, 0.34);
+        transition: transform 140ms ease, box-shadow 140ms ease, filter 140ms ease;
+      }
+
+      .start-button:hover,
+      .start-button:focus-visible {
+        filter: brightness(1.06);
+        outline: none;
+        transform: translateY(-2px);
+      }
+
+      .start-button:active {
+        box-shadow: 0 4px 0 rgba(0, 0, 0, 0.34);
+        transform: translateY(6px);
+      }
+
+      .start-board {
+        align-self: stretch;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        border-radius: 8px;
+        background: rgba(255, 255, 255, 0.06);
+        padding: 14px;
+      }
+
+      .settlement-actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 24px;
+      }
+
+      .settlement-button {
+        min-height: 52px;
+        border: 0;
+        border-radius: 8px;
+        padding: 0 20px;
+        background: var(--amber);
+        color: #111827;
+        cursor: pointer;
+        font-weight: 900;
+        box-shadow: 0 8px 0 rgba(0, 0, 0, 0.32);
+      }
+
+      .screen-shake .game {
+        animation: screen-shake 320ms ease;
+      }
+
+      @keyframes card-pop {
+        0% {
+          transform: translateY(0) rotate(0deg) scale(1);
+        }
+        45% {
+          transform: translateY(-16px) rotate(-1deg) scale(1.025);
+        }
+        100% {
+          transform: translateY(-8px) rotate(-1deg) scale(1);
+        }
+      }
+
+      @keyframes card-wrong {
+        0%,
+        100% {
+          transform: translateX(0) rotate(0deg);
+        }
+        25% {
+          transform: translateX(-12px) rotate(-1deg);
+        }
+        50% {
+          transform: translateX(12px) rotate(1deg);
+        }
+        75% {
+          transform: translateX(-7px) rotate(-1deg);
+        }
+      }
+
+      @keyframes burst-pop {
+        0% {
+          opacity: 0;
+          transform: translate(-50%, -50%) scale(0.72);
+        }
+        22% {
+          opacity: 1;
+          transform: translate(-50%, -50%) scale(1.08);
+        }
+        72% {
+          opacity: 1;
+          transform: translate(-50%, -50%) scale(1);
+        }
+        100% {
+          opacity: 0;
+          transform: translate(-50%, -68%) scale(0.96);
+        }
+      }
+
+      @keyframes score-rise {
+        0% {
+          opacity: 0;
+          transform: translate(-50%, 14px) scale(0.84);
+        }
+        18% {
+          opacity: 1;
+        }
+        100% {
+          opacity: 0;
+          transform: translate(-50%, -62px) scale(1.08);
+        }
+      }
+
+      @keyframes screen-shake {
+        0%,
+        100% {
+          transform: translateX(0);
+        }
+        20% {
+          transform: translateX(-10px);
+        }
+        40% {
+          transform: translateX(8px);
+        }
+        60% {
+          transform: translateX(-6px);
+        }
+        80% {
+          transform: translateX(4px);
+        }
+      }
+
+      @keyframes settle-in {
+        from {
+          opacity: 0;
+          transform: translateY(18px) scale(0.98);
+        }
+        to {
+          opacity: 1;
+          transform: translateY(0) scale(1);
+        }
+      }
+
+      @media (max-width: 920px) {
+        body {
+          overflow: auto;
+        }
+
+        .game {
+          min-height: auto;
+        }
+
+        .hud,
+        .arena {
+          grid-template-columns: 1fr;
+        }
+
+        .metric {
+          min-height: 66px;
+        }
+
+        .arena,
+        .card-stack,
+        .panel {
+          min-height: auto;
+        }
+
+        .details {
+          grid-template-columns: 1fr;
+        }
+
+        .settlement-grid {
+          grid-template-columns: 1fr;
+        }
+
+        .leaderboard-row {
+          grid-template-columns: 42px minmax(0, 1fr);
+        }
+
+        .leaderboard-score {
+          justify-self: start;
+        }
+
+        .start-card {
+          grid-template-columns: 1fr;
+        }
+
+        .start-stats {
+          grid-template-columns: 1fr;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <main class="game" data-game-root>
+      <section class="hud" aria-label="游戏状态">
+        <div class="brand">
+          <p class="kicker">Anti-fraud Arcade</p>
+          <h1>诈骗拦截大作战</h1>
+        </div>
+        <div class="metric">
+          <span>得分</span>
+          <strong data-score>0</strong>
+        </div>
+        <div class="metric">
+          <span>生命</span>
+          <strong data-lives>3</strong>
+        </div>
+        <div class="metric">
+          <span>连击</span>
+          <strong data-streak>0</strong>
+        </div>
+        <div class="metric">
+          <span>倒计时</span>
+          <strong data-time>60</strong>
+        </div>
+      </section>
+
+      <section class="arena">
+        <div class="card-stack" aria-live="polite">
+          <div class="feedback-burst" data-feedback-burst></div>
+          <div class="float-score" data-float-score></div>
+          <article class="case-card" data-card>
+            <div class="case-top">
+              <div>
+                <p class="case-type" data-type>加载中</p>
+                <p class="label" data-channel>等待案例</p>
+              </div>
+              <div class="risk-tag" data-risk>待判断</div>
+            </div>
+            <p class="message" data-message>准备开始识别可疑信息。</p>
+            <div class="details">
+              <div class="detail">
+                <span class="label">金额</span>
+                <strong data-amount>--</strong>
+              </div>
+              <div class="detail">
+                <span class="label">动作</span>
+                <strong data-request>--</strong>
+              </div>
+              <div class="detail">
+                <span class="label">时限</span>
+                <strong data-deadline>--</strong>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <aside class="panel">
+          <div>
+            <p class="kicker">Signal Board</p>
+            <h2>风险线索</h2>
+          </div>
+          <div class="signal-list" data-signals></div>
+          <div class="verdict" data-feedback>看清信息来源、转账要求和紧迫话术，再决定拦截或放行。</div>
+          <div class="controls">
+            <button class="action intercept" type="button" data-action="intercept">拦截</button>
+            <button class="action allow" type="button" data-action="allow">放行</button>
+          </div>
+        </aside>
+      </section>
+
+      <section class="feed">
+        <div>
+          <p class="label">连击能量</p>
+          <div class="combo-bar" aria-hidden="true">
+            <div class="combo-fill" data-combo></div>
+          </div>
+        </div>
+        <button class="restart" type="button" data-restart>重新开始</button>
+      </section>
+    </main>
+
+    <section class="settlement" data-settlement hidden role="dialog" aria-modal="true" aria-labelledby="settlement-title">
+      <div class="settlement-card">
+        <p class="kicker">Mission Report</p>
+        <h2 class="settlement-title" id="settlement-title" data-final-title>训练结算</h2>
+        <p class="settlement-copy" data-final-copy>你的反诈识别表现会显示在这里。</p>
+        <div class="settlement-grid">
+          <div class="settlement-metric">
+            <span class="label">最终得分</span>
+            <strong data-final-score>0</strong>
+          </div>
+          <div class="settlement-metric">
+            <span class="label">正确率</span>
+            <strong data-final-accuracy>0%</strong>
+          </div>
+          <div class="settlement-metric">
+            <span class="label">最高连击</span>
+            <strong data-final-streak>0</strong>
+          </div>
+        </div>
+        <section class="leaderboard" aria-label="本地排行榜">
+          <div class="leaderboard-head">
+            <p class="kicker">Leaderboard</p>
+            <span class="label">本机 Top 5</span>
+          </div>
+          <div class="leaderboard-list" data-leaderboard></div>
+        </section>
+        <div class="settlement-actions">
+          <button class="settlement-button" type="button" data-settlement-restart>再来一局</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="start-screen" data-start-screen role="dialog" aria-modal="true" aria-labelledby="start-title">
+      <div class="start-card">
+        <div>
+          <p class="kicker">Ready Room</p>
+          <h2 class="start-title" id="start-title">诈骗拦截大作战</h2>
+          <p class="start-copy">60 秒内快速判断信息卡：诈骗点“拦截”，正常信息点“放行”。连击越高，得分越猛。</p>
+          <div class="start-stats">
+            <div class="start-stat">
+              <span class="label">历史最高分</span>
+              <strong data-best-score>0</strong>
+            </div>
+            <div class="start-stat">
+              <span class="label">单局时长</span>
+              <strong>60s</strong>
+            </div>
+          </div>
+          <button class="start-button" type="button" data-start-game>开始游戏</button>
+        </div>
+        <aside class="start-board">
+          <div class="leaderboard-head">
+            <p class="kicker">Leaderboard</p>
+            <span class="label">本机 Top 5</span>
+          </div>
+          <div class="leaderboard-list" data-start-leaderboard></div>
+        </aside>
+      </div>
+    </section>
+
+    <script>
+      const GAME_DURATION_SECONDS = 60;
+      const ARCADE_LEADERBOARD_KEY = "anti_fraud_arcade_leaderboard_v1";
+
+      const CARD_DECK = [
+        {
+          kind: "fraud",
+          type: "冒充公检法",
+          channel: "陌生来电",
+          message: "你的账户涉嫌洗钱，立即把资金转入安全账户接受核查。",
+          amount: "全部存款",
+          request: "转账 + 保密",
+          deadline: "30 分钟",
+          risk: ["安全账户不存在", "要求对家人保密", "用恐吓制造紧迫感"],
+          explain: "公检法不会电话办案，更不会要求转账到安全账户。",
+        },
+        {
+          kind: "fraud",
+          type: "刷单返利",
+          channel: "群聊链接",
+          message: "完成三单就能提现，最后一单金额越大返利越高。",
+          amount: "2680 元",
+          request: "垫付下单",
+          deadline: "今晚前",
+          risk: ["先小额返利诱导", "要求继续垫资", "提现门槛不断变化"],
+          explain: "刷单本身违法，垫资返利常见套路是逐步加码后拒绝提现。",
+        },
+        {
+          kind: "safe",
+          type: "银行提醒",
+          channel: "官方 App",
+          message: "检测到异地登录，请在官方 App 内修改密码并开启设备验证。",
+          amount: "0 元",
+          request: "改密 + 验证",
+          deadline: "不限",
+          risk: ["不索要验证码", "不要求转账", "在官方 App 内完成"],
+          explain: "该提醒没有资金转移和验证码索取，来源也在官方 App 内，可放行。",
+        },
+        {
+          kind: "fraud",
+          type: "虚假投资",
+          channel: "社交好友",
+          message: "内部量化平台稳涨不跌，先充值一万，老师带你翻倍。",
+          amount: "10000 元",
+          request: "充值平台",
+          deadline: "名额有限",
+          risk: ["承诺稳涨", "非正规平台充值", "老师带单催促入金"],
+          explain: "投资没有保本高收益，陌生平台入金很可能无法提现。",
+        },
+        {
+          kind: "safe",
+          type: "学校通知",
+          channel: "班级群",
+          message: "明天下午统一反诈讲座，请同学携带校园卡签到。",
+          amount: "0 元",
+          request: "线下签到",
+          deadline: "明天下午",
+          risk: ["无转账", "无验证码", "线下公开活动"],
+          explain: "公开线下活动且不涉及资金和隐私验证码，可以放行。",
+        },
+        {
+          kind: "fraud",
+          type: "网络贷款",
+          channel: "短信链接",
+          message: "贷款已批，先交保证金刷流水，到账后自动退还。",
+          amount: "1200 元",
+          request: "先交费用",
+          deadline: "2 小时",
+          risk: ["放款前收费", "要求刷流水", "短信外链下载"],
+          explain: "正规贷款不会在放款前收保证金、解冻金或刷流水费用。",
+        },
+        {
+          kind: "fraud",
+          type: "冒充客服",
+          channel: "网页客服",
+          message: "你购买的商品甲醛超标，点击链接领取三倍退款。",
+          amount: "验证码",
+          request: "共享屏幕",
+          deadline: "马上过期",
+          risk: ["退款要验证码", "要求共享屏幕", "脱离原平台处理"],
+          explain: "退款应在原平台完成，验证码和屏幕共享会暴露账户控制权。",
+        },
+        {
+          kind: "safe",
+          type: "快递确认",
+          channel: "官方小程序",
+          message: "包裹派送失败，请选择重新派送时间，不收取额外费用。",
+          amount: "0 元",
+          request: "选择时间",
+          deadline: "48 小时",
+          risk: ["官方小程序", "不收费", "不索要支付密码"],
+          explain: "只调整派送时间且不收款、不索要密码，风险较低。",
+        },
+        {
+          kind: "fraud",
+          type: "中奖缴费",
+          channel: "私信",
+          message: "你被抽中一等奖，先缴纳个人所得税才能领奖。",
+          amount: "999 元",
+          request: "缴税领奖",
+          deadline: "今日有效",
+          risk: ["中奖先交钱", "私信通知", "倒计时催促"],
+          explain: "真实奖金税费不会通过私人账户预缴，先交钱领奖要拦截。",
+        },
+        {
+          kind: "fraud",
+          type: "冒充公检法",
+          channel: "自称市公安局来电",
+          message: "你涉嫌一起洗钱案，需把存款转入安全账户配合资金清查，否则上门逮捕。",
+          amount: "全部存款",
+          request: "安全账户",
+          deadline: "立即",
+          risk: ["公检法电话办案", "安全账户", "威胁逮捕"],
+          explain: "旧 Godot 题库：公检法绝不会电话办案，更没有安全账户。",
+        },
+        {
+          kind: "fraud",
+          type: "冒充公检法",
+          channel: "未知号码通知",
+          message: "您有一份法院传票未签收，逾期将冻结名下账户，点击链接查看并配合处理。",
+          amount: "账户资金",
+          request: "点击链接",
+          deadline: "逾期冻结",
+          risk: ["短信传票", "陌生链接", "冻结恐吓"],
+          explain: "旧 Godot 题库：法院不会用短信链接送达，更不会要求你处理资金。",
+        },
+        {
+          kind: "fraud",
+          type: "刷单返利",
+          channel: "兼职招聘短信",
+          message: "足不出户日结 300+，先垫付后秒返本金加佣金，加微信领任务。",
+          amount: "首单垫付",
+          request: "加微信做任务",
+          deadline: "今日招满",
+          risk: ["先垫付", "高薪日结", "私人微信派单"],
+          explain: "旧 Godot 题库：凡先垫付后返利的兼职都是诈骗，前期小返现只是诱饵。",
+        },
+        {
+          kind: "fraud",
+          type: "冒充客服理赔",
+          channel: "自称网店客服来电",
+          message: "您买的奶粉质检不合格，为您办理三倍理赔，请共享屏幕按我说的操作。",
+          amount: "验证码",
+          request: "共享屏幕",
+          deadline: "马上处理",
+          risk: ["脱离原平台", "屏幕共享", "退款索要验证码"],
+          explain: "旧 Godot 题库：退款只在原平台操作，要求屏幕共享和验证码就是诈骗。",
+        },
+        {
+          kind: "fraud",
+          type: "冒充客服理赔",
+          channel: "自称快递客服来电",
+          message: "您的快递丢失，我们将双倍赔付 200 元，请按语音提示输入银行卡号和密码。",
+          amount: "银行卡密码",
+          request: "语音输入",
+          deadline: "本次通话内",
+          risk: ["索要银行卡密码", "主动高额理赔", "语音诱导操作"],
+          explain: "旧 Godot 题库：快递理赔不需要银行卡密码，直接联系官方渠道核实。",
+        },
+        {
+          kind: "fraud",
+          type: "中奖免费送",
+          channel: "未知号码通知",
+          message: "恭喜您被抽中免费送扫地机器人，仅需支付 99 元运费，点击短链接领取。",
+          amount: "99 元",
+          request: "先付运费",
+          deadline: "名额保留 10 分钟",
+          risk: ["中奖先交钱", "短链接", "免费礼品诱饵"],
+          explain: "旧 Godot 题库：领奖前要先交钱的都是诈骗。",
+        },
+        {
+          kind: "fraud",
+          type: "虚假贷款",
+          channel: "贷款平台短信",
+          message: "无抵押当天放款 5 万，因银行卡号填错被冻结，需缴解冻金激活。",
+          amount: "解冻金",
+          request: "先交费用",
+          deadline: "今天激活",
+          risk: ["放款前收费", "银行卡号填错", "解冻金"],
+          explain: "旧 Godot 题库：正规贷款放款前绝不收费。",
+        },
+        {
+          kind: "fraud",
+          type: "虚假贷款",
+          channel: "某金融短信",
+          message: "您已预审通过 20 万额度，下款前需购买信用保证保险 1980 元。",
+          amount: "1980 元",
+          request: "买保证保险",
+          deadline: "额度保留中",
+          risk: ["下款前收费", "预审高额度", "保证保险"],
+          explain: "旧 Godot 题库：放款前以保险、会员费、保证金名义收费都是虚假贷款。",
+        },
+        {
+          kind: "fraud",
+          type: "机票退改签",
+          channel: "95xxx 短信",
+          message: "您预订的航班已取消，可领 300 元延误补偿，请按短信链接操作。",
+          amount: "银行卡信息",
+          request: "短信链接登记",
+          deadline: "航班起飞前",
+          risk: ["退改签陌生链接", "补偿诱导", "索要银行卡"],
+          explain: "旧 Godot 题库：机票退改签只走航司官方渠道，不点陌生链接。",
+        },
+        {
+          kind: "fraud",
+          type: "机票退改签",
+          channel: "自称航空客服来电",
+          message: "您的航班因天气取消，办理改签将退还差价 420 元，请提供银行卡。",
+          amount: "银行卡",
+          request: "退差价验证",
+          deadline: "现在办理",
+          risk: ["电话索要银行卡", "改签退差价", "脱离官方渠道"],
+          explain: "旧 Godot 题库：挂断后拨打航司官方电话或到官方 App 办理。",
+        },
+        {
+          kind: "fraud",
+          type: "钓鱼短信",
+          channel: "积分中心短信",
+          message: "您的积分即将清零，点击 http://hd-jf.cn 兑换现金等好礼。",
+          amount: "账号密码",
+          request: "点链接登录",
+          deadline: "即将清零",
+          risk: ["非官方域名", "HTTP 链接", "积分清零催促"],
+          explain: "旧 Godot 题库：官方短信不会用不明链接索要密码或验证码。",
+        },
+        {
+          kind: "fraud",
+          type: "钓鱼短信",
+          channel: "ETC 中心短信",
+          message: "您的 ETC 已失效，请点击 etc-rz.cn 重新认证，逾期将无法通行。",
+          amount: "支付信息",
+          request: "ETC 认证",
+          deadline: "逾期停用",
+          risk: ["ETC 失效认证", "仿冒域名", "逾期恐吓"],
+          explain: "旧 Godot 题库：ETC/银行卡失效认证短信常是钓鱼，去官方 App 或网点办理。",
+        },
+        {
+          kind: "fraud",
+          type: "冒充客服扣费",
+          channel: "自称客服来电",
+          message: "您的百万保障将到期，每月自动扣费 800 元，需立即取消并验证账户。",
+          amount: "银行卡信息",
+          request: "取消扣费",
+          deadline: "立即取消",
+          risk: ["百万保障", "扣费恐吓", "验证账户"],
+          explain: "旧 Godot 题库：莫名会员或保障到期扣费是恐吓话术，不点链接不共享屏幕。",
+        },
+        {
+          kind: "fraud",
+          type: "冒充客服扣费",
+          channel: "自称视频客服短信",
+          message: "您开通的会员连续包年将扣费 348 元，如需取消请按提示操作并验证。",
+          amount: "验证码",
+          request: "验证取消",
+          deadline: "扣费前",
+          risk: ["误开会员", "连续扣费", "陌生提示验证"],
+          explain: "旧 Godot 题库：取消扣费应在原 App 内完成。",
+        },
+        {
+          kind: "fraud",
+          type: "注销校园贷",
+          channel: "自称金融客服来电",
+          message: "您的校园贷账户未注销将影响征信，请把网贷额度提现转入对冲账户清零。",
+          amount: "网贷额度",
+          request: "提现转账",
+          deadline: "今天清零",
+          risk: ["影响征信", "提现贷款", "对冲账户"],
+          explain: "旧 Godot 题库：没用过的校园贷无需注销，让你借款转给他人的一律是诈骗。",
+        },
+        {
+          kind: "fraud",
+          type: "注销校园贷",
+          channel: "自称监管客服来电",
+          message: "学生专属账户需按监管注销，否则上报征信影响考公，请联系客服操作。",
+          amount: "贷款额度",
+          request: "配合注销",
+          deadline: "限时处理",
+          risk: ["注销学生账户", "征信威胁", "考公恐吓"],
+          explain: "旧 Godot 题库：征信不会因不注销学生账户受损。",
+        },
+        {
+          kind: "fraud",
+          type: "冒充老师收费",
+          channel: "班级群消息",
+          message: "各位家长，本学期资料费 380 元，请扫码统一缴纳，缴费后接龙确认。",
+          amount: "380 元",
+          request: "扫码缴费",
+          deadline: "今晚统计",
+          risk: ["群内突然收费", "扫码转账", "接龙催促"],
+          explain: "旧 Godot 题库：群里突然扫码收费要先电话联系老师本人核实。",
+        },
+        {
+          kind: "fraud",
+          type: "冒充老师收费",
+          channel: "群内自称老师",
+          message: "紧急征订教辅 256 元，扫码后回复孩子姓名，名额有限速缴。",
+          amount: "256 元",
+          request: "扫码付款",
+          deadline: "名额有限",
+          risk: ["头像仿冒老师", "紧急缴费", "扫码付款"],
+          explain: "旧 Godot 题库：催促扫码缴费加头像仿冒老师，是混群冒充诈骗。",
+        },
+        {
+          kind: "fraud",
+          type: "冒充熟人",
+          channel: "陌生好友消息",
+          message: "我手机进水换了新号，你先帮我给这个账户转 8000 应急，回头还你。",
+          amount: "8000 元",
+          request: "代转应急",
+          deadline: "马上要用",
+          risk: ["换号", "借钱应急", "指定账户"],
+          explain: "旧 Godot 题库：凡换号又要转账，务必电话或当面核实本人。",
+        },
+        {
+          kind: "fraud",
+          type: "冒充领导",
+          channel: "自称领导好友",
+          message: "加我新号，有笔款急着打给客户，你先帮我转一下，回公司报销。",
+          amount: "客户货款",
+          request: "代转垫付",
+          deadline: "会议前",
+          risk: ["领导换号", "不能通话", "垫付货款"],
+          explain: "旧 Godot 题库：换号、开会、不能通话、催转账的组合高度危险。",
+        },
+        {
+          kind: "fraud",
+          type: "虚假投资",
+          channel: "投资群短信",
+          message: "跟着导师内部计划稳赚不赔，今日布局名额仅剩 3 个，私聊领取。",
+          amount: "入金金额",
+          request: "跟导师投资",
+          deadline: "今日名额",
+          risk: ["稳赚不赔", "内部计划", "名额稀缺"],
+          explain: "旧 Godot 题库：承诺稳赚不赔、内部消息都是诈骗话术。",
+        },
+        {
+          kind: "fraud",
+          type: "杀猪盘",
+          channel: "网恋对象消息",
+          message: "我有内部理财渠道，咱俩一起投攒钱买房，先投 1 万试试水。",
+          amount: "10000 元",
+          request: "一起投资",
+          deadline: "今晚入场",
+          risk: ["网恋荐投资", "共同未来诱导", "先小额试水"],
+          explain: "旧 Godot 题库：网恋加荐投资就是杀猪盘，平台由骗子操控。",
+        },
+        {
+          kind: "fraud",
+          type: "解冻民族资产",
+          channel: "民族大业群消息",
+          message: "缴 99 元会费即可解冻领取 380 万民族资产补助，名额有限。",
+          amount: "99 元",
+          request: "缴会费领补助",
+          deadline: "名额有限",
+          risk: ["民族资产", "小钱领巨款", "群内项目"],
+          explain: "旧 Godot 题库：国家从无此类项目，交小钱领巨款必是骗局。",
+        },
+        {
+          kind: "fraud",
+          type: "解冻民族资产",
+          channel: "扶贫专项群消息",
+          message: "注册会员交 188 元工本费，可领取 50 万精准帮扶金，速度报名。",
+          amount: "188 元",
+          request: "注册缴费",
+          deadline: "速度报名",
+          risk: ["国家专项仿冒", "工本费", "高额帮扶金"],
+          explain: "旧 Godot 题库：伪造国家专项或帮扶金收费，常针对老人。",
+        },
+        {
+          kind: "safe",
+          type: "正常银行通知",
+          channel: "中国工商银行短信",
+          message: "您尾号 1234 账户 10 月 21 日 12:30 支出 500.00 元，余额 3200.00 元。",
+          amount: "0 元",
+          request: "无需操作",
+          deadline: "无",
+          risk: ["只告知交易", "无链接", "无验证码"],
+          explain: "旧 Godot 题库：银行消费提醒只告知结果，不要求点击链接或转账。",
+        },
+        {
+          kind: "safe",
+          type: "正常快递通知",
+          channel: "官方物流短信",
+          message: "您的包裹已放至小区快递柜，取件码 8A2F，请及时取件。",
+          amount: "0 元",
+          request: "取件",
+          deadline: "及时取件",
+          risk: ["无转账", "无链接", "不索要密码"],
+          explain: "旧 Godot 题库：单纯取件通知不涉及资金和隐私验证，可以放行。",
+        },
+        {
+          kind: "safe",
+          type: "正常学校通知",
+          channel: "学校官方群",
+          message: "本周五下午开展反诈讲座，请同学携带校园卡到报告厅签到。",
+          amount: "0 元",
+          request: "线下签到",
+          deadline: "周五下午",
+          risk: ["公开通知", "线下活动", "无缴费链接"],
+          explain: "旧 Godot 题库：公开线下活动且不涉及收费，可以放行。",
+        },
+      ];
+
+      const state = {
+        index: 0,
+        score: 0,
+        lives: 3,
+        streak: 0,
+        time: GAME_DURATION_SECONDS,
+        locked: false,
+        deck: [],
+        timer: null,
+        answered: 0,
+        correct: 0,
+        bestStreak: 0,
+      };
+
+      const nodes = {
+        score: document.querySelector("[data-score]"),
+        lives: document.querySelector("[data-lives]"),
+        streak: document.querySelector("[data-streak]"),
+        time: document.querySelector("[data-time]"),
+        card: document.querySelector("[data-card]"),
+        type: document.querySelector("[data-type]"),
+        channel: document.querySelector("[data-channel]"),
+        risk: document.querySelector("[data-risk]"),
+        message: document.querySelector("[data-message]"),
+        amount: document.querySelector("[data-amount]"),
+        request: document.querySelector("[data-request]"),
+        deadline: document.querySelector("[data-deadline]"),
+        signals: document.querySelector("[data-signals]"),
+        feedback: document.querySelector("[data-feedback]"),
+        feedbackBurst: document.querySelector("[data-feedback-burst]"),
+        floatScore: document.querySelector("[data-float-score]"),
+        combo: document.querySelector("[data-combo]"),
+        actions: document.querySelectorAll("[data-action]"),
+        restart: document.querySelector("[data-restart]"),
+        settlement: document.querySelector("[data-settlement]"),
+        finalTitle: document.querySelector("[data-final-title]"),
+        finalCopy: document.querySelector("[data-final-copy]"),
+        finalScore: document.querySelector("[data-final-score]"),
+        finalAccuracy: document.querySelector("[data-final-accuracy]"),
+        finalStreak: document.querySelector("[data-final-streak]"),
+        leaderboard: document.querySelector("[data-leaderboard]"),
+        settlementRestart: document.querySelector("[data-settlement-restart]"),
+        startScreen: document.querySelector("[data-start-screen]"),
+        startGame: document.querySelector("[data-start-game]"),
+        bestScore: document.querySelector("[data-best-score]"),
+        startLeaderboard: document.querySelector("[data-start-leaderboard]"),
+      };
+
+      function shuffle(cards) {
+        return [...cards].sort(() => Math.random() - 0.5);
+      }
+
+      function currentCard() {
+        if (state.index >= state.deck.length) {
+          state.deck = shuffle(CARD_DECK);
+          state.index = 0;
+        }
+        return state.deck[state.index];
+      }
+
+      function renderHud() {
+        nodes.score.textContent = state.score;
+        nodes.lives.textContent = state.lives;
+        nodes.streak.textContent = state.streak;
+        nodes.time.textContent = state.time;
+        nodes.combo.style.width = `${Math.min(100, state.streak * 16)}%`;
+      }
+
+      function renderCard() {
+        const card = currentCard();
+        nodes.type.textContent = card.type;
+        nodes.channel.textContent = card.channel;
+        nodes.risk.textContent = "待判断";
+        nodes.risk.className = "risk-tag";
+        nodes.message.textContent = card.message;
+        nodes.amount.textContent = card.amount;
+        nodes.request.textContent = card.request;
+        nodes.deadline.textContent = card.deadline;
+        nodes.signals.innerHTML = card.risk.map((item) => `<div class="signal">${item}</div>`).join("");
+        nodes.feedback.textContent = "看清信息来源、转账要求和紧迫话术，再决定拦截或放行。";
+        nodes.feedback.className = "verdict";
+        nodes.card.classList.remove("bump", "correct", "wrong");
+      }
+
+      function replayAnimation(node, className) {
+        node.className = className;
+        void node.offsetWidth;
+        node.classList.add("show");
+      }
+
+      function showAnswerFeedback(isCorrect, delta, card) {
+        const tone = isCorrect ? "correct" : "wrong";
+        const actionText = card.kind === "fraud" ? "拦截" : "放行";
+
+        nodes.card.classList.remove("correct", "wrong", "bump");
+        void nodes.card.offsetWidth;
+        nodes.card.classList.add("bump", tone);
+        nodes.feedback.className = `verdict ${tone}`;
+        nodes.feedbackBurst.textContent = isCorrect ? `${actionText}成功` : "误判";
+        nodes.floatScore.textContent = delta > 0 ? `+${delta}` : `${delta}`;
+        replayAnimation(nodes.feedbackBurst, `feedback-burst ${tone}`);
+        replayAnimation(nodes.floatScore, `float-score ${tone}`);
+
+        if (!isCorrect) {
+          document.body.classList.remove("screen-shake");
+          void document.body.offsetWidth;
+          document.body.classList.add("screen-shake");
+          window.setTimeout(() => document.body.classList.remove("screen-shake"), 360);
+        }
+      }
+
+      function loadLeaderboard() {
+        try {
+          const saved = JSON.parse(localStorage.getItem(ARCADE_LEADERBOARD_KEY) || "[]");
+          return Array.isArray(saved) ? saved : [];
+        } catch (error) {
+          return [];
+        }
+      }
+
+      function saveLeaderboard(entry) {
+        const sorted = [...loadLeaderboard(), entry]
+          .sort((left, right) => {
+            if (right.score !== left.score) {
+              return right.score - left.score;
+            }
+            if (right.accuracy !== left.accuracy) {
+              return right.accuracy - left.accuracy;
+            }
+            return right.bestStreak - left.bestStreak;
+          })
+          .slice(0, 5);
+
+        try {
+          localStorage.setItem(ARCADE_LEADERBOARD_KEY, JSON.stringify(sorted));
+        } catch (error) {
+          return sorted;
+        }
+        return sorted;
+      }
+
+      function renderLeaderboardInto(target, entries, currentId) {
+        target.replaceChildren();
+        if (!entries.length) {
+          const empty = document.createElement("div");
+          empty.className = "leaderboard-empty";
+          empty.textContent = "暂无记录，打完一局就会上榜。";
+          target.appendChild(empty);
+          return;
+        }
+
+        entries.forEach((entry, index) => {
+          const isCurrent = entry.id === currentId;
+          const row = document.createElement("div");
+          row.className = `leaderboard-row ${isCurrent ? "current" : ""}`;
+
+          const rank = document.createElement("div");
+          rank.className = "leaderboard-rank";
+          rank.textContent = `#${index + 1}`;
+
+          const body = document.createElement("div");
+          const score = document.createElement("div");
+          score.className = "leaderboard-score";
+          score.textContent = `${Number(entry.score) || 0} 分`;
+          const meta = document.createElement("div");
+          meta.className = "leaderboard-meta";
+          meta.textContent = `正确率 ${Number(entry.accuracy) || 0}% · 最高连击 ${Number(entry.bestStreak) || 0} · ${entry.playedAt || "-"}`;
+          body.append(score, meta);
+
+          const badge = document.createElement("div");
+          badge.className = "leaderboard-meta";
+          badge.textContent = isCurrent ? "本局" : "历史";
+
+          row.append(rank, body, badge);
+          target.appendChild(row);
+        });
+      }
+
+      function renderLeaderboard(entries, currentId) {
+        renderLeaderboardInto(nodes.leaderboard, entries, currentId);
+      }
+
+      function showStartScreen() {
+        const leaderboard = loadLeaderboard();
+        const best = leaderboard.length ? Math.max(...leaderboard.map((entry) => Number(entry.score) || 0)) : 0;
+        clearInterval(state.timer);
+        state.locked = true;
+        nodes.bestScore.textContent = best;
+        nodes.settlement.hidden = true;
+        nodes.startScreen.hidden = false;
+        renderLeaderboardInto(nodes.startLeaderboard, leaderboard, "");
+        renderHud();
+      }
+
+      function finishGame() {
+        const accuracy = state.answered ? Math.round((state.correct / state.answered) * 100) : 0;
+        const leaderboardEntry = {
+          id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+          score: state.score,
+          accuracy,
+          bestStreak: state.bestStreak,
+          correct: state.correct,
+          answered: state.answered,
+          playedAt: new Date().toLocaleString("zh-CN", { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }),
+        };
+        const leaderboard = saveLeaderboard(leaderboardEntry);
+
+        clearInterval(state.timer);
+        state.locked = true;
+        nodes.feedback.textContent = `训练结束。最终得分 ${state.score}，正确率 ${accuracy}%，最高连击 ${state.bestStreak}。`;
+        nodes.finalScore.textContent = state.score;
+        nodes.finalAccuracy.textContent = `${accuracy}%`;
+        nodes.finalStreak.textContent = state.bestStreak;
+        nodes.finalTitle.textContent = accuracy >= 80 ? "反诈尖兵" : accuracy >= 55 ? "继续训练" : "风险复盘";
+        nodes.finalCopy.textContent =
+          accuracy >= 80
+            ? "你对高压转账、验证码索取和异常链接的识别很稳，可以继续挑战更快节奏。"
+            : accuracy >= 55
+              ? "已经抓住了不少关键线索，再练几轮会更快形成条件反射。"
+              : "这局暴露了几个识别盲点，重点回看资金转移、验证码和紧迫话术。";
+        renderLeaderboard(leaderboard, leaderboardEntry.id);
+        nodes.settlement.hidden = false;
+        nodes.actions.forEach((button) => {
+          button.disabled = true;
+        });
+      }
+
+      function answer(action) {
+        if (state.locked) {
+          return;
+        }
+
+        const card = currentCard();
+        const isCorrect = (action === "intercept" && card.kind === "fraud") || (action === "allow" && card.kind === "safe");
+        let delta = -6;
+
+        nodes.risk.textContent = card.kind === "fraud" ? "应拦截" : "可放行";
+        nodes.risk.className = `risk-tag ${card.kind === "fraud" ? "high" : "safe"}`;
+        state.answered += 1;
+
+        if (isCorrect) {
+          state.streak += 1;
+          state.correct += 1;
+          state.bestStreak = Math.max(state.bestStreak, state.streak);
+          delta = card.kind === "fraud" ? 12 + state.streak : 8 + state.streak;
+          state.score += delta;
+          nodes.feedback.textContent = `判断正确。${card.explain}`;
+        } else {
+          state.streak = 0;
+          state.lives -= 1;
+          state.score = Math.max(0, state.score - 6);
+          nodes.feedback.textContent = `判断失误。${card.explain}`;
+        }
+
+        showAnswerFeedback(isCorrect, delta, card);
+        state.index += 1;
+        renderHud();
+
+        if (state.lives <= 0) {
+          finishGame();
+          return;
+        }
+
+        state.locked = true;
+        window.setTimeout(() => {
+          state.locked = false;
+          renderCard();
+        }, 1050);
+      }
+
+      function startGame() {
+        clearInterval(state.timer);
+        nodes.startScreen.hidden = true;
+        state.index = 0;
+        state.score = 0;
+        state.lives = 3;
+        state.streak = 0;
+        state.time = GAME_DURATION_SECONDS;
+        state.locked = false;
+        state.deck = shuffle(CARD_DECK);
+        state.answered = 0;
+        state.correct = 0;
+        state.bestStreak = 0;
+        nodes.settlement.hidden = true;
+        nodes.feedback.className = "verdict";
+        nodes.feedbackBurst.className = "feedback-burst";
+        nodes.floatScore.className = "float-score";
+        renderLeaderboard(loadLeaderboard(), "");
+        nodes.actions.forEach((button) => {
+          button.disabled = false;
+        });
+        renderHud();
+        renderCard();
+        state.timer = window.setInterval(() => {
+          state.time -= 1;
+          renderHud();
+          if (state.time <= 0) {
+            finishGame();
+          }
+        }, 1000);
+      }
+
+      nodes.actions.forEach((button) => {
+        button.addEventListener("click", () => answer(button.dataset.action));
+      });
+
+      nodes.restart.addEventListener("click", startGame);
+      nodes.settlementRestart.addEventListener("click", startGame);
+      nodes.startGame.addEventListener("click", startGame);
+
+      window.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowLeft") {
+          answer("intercept");
+        }
+        if (event.key === "ArrowRight") {
+          answer("allow");
+        }
+      });
+
+      showStartScreen();
+    </script>
+  </body>
+</html>

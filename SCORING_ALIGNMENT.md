@@ -18,7 +18,7 @@
 
 | 维度 | 内容 |
 |------|------|
-| **对应功能** | 结构化反诈知识库，含 11 类骗局（覆盖刷单返利、游戏交易、冒充公检法、虚假投资、校园贷、助学金/奖学金、机票退改签、AI深度伪造等）和 5 部法律法规 |
+| **对应功能** | 结构化反诈知识库，含 14 类骗局（覆盖刷单返利、游戏交易、冒充公检法、虚假投资、校园贷、助学金/奖学金、机票退改签、AI深度伪造、人社/社保补贴钓鱼、银行账户异常认证、高考招生录取诈骗等）和 5 部法律法规 |
 | **数据结构** | JSON Schema 化：每条骗局含 `id`、`type`、`name`、`keywords`、`tactics`、`red_flags`、`typical_case`、`prevention`、`legal_refs` |
 | **演示入口** | `GET /knowledge/scams` → 返回全部骗局条目；`GET /knowledge/laws` → 返回法律要点 |
 | **前端入口** | `/knowledge` 知识库页面，支持关键词搜索过滤 |
@@ -30,11 +30,11 @@
 
 | 维度 | 内容 |
 |------|------|
-| **对应功能** | ① JSON 配置驱动的风险规则引擎（14 条文本规则 + 10 类 URL 结构检查 + 品牌仿冒检测）；② 轻量级意图识别器 |
-| **规则配置** | 每条规则含名称、触发词、权重、原因、版本和依据；文本规则集 `2.1.0`，URL 规则集 `2.2.0`。支持同分句否定语义、域名边界白名单、子域名伪装、相似字符与相邻字符交换检测 |
+| **对应功能** | ① JSON 配置驱动的风险规则引擎（29 条文本规则 + 10 类 URL 结构检查 + 品牌仿冒检测）；② 轻量级意图识别器 |
+| **规则配置** | 每条规则含名称、触发词、权重、原因、版本和依据；文本规则集 `2.4.0`，URL 规则集 `2.4.0`。支持组合触发、同分句否定语义、URL 独立阈值、域名边界白名单、子域名伪装、相似字符与相邻字符交换检测 |
 | **演示入口** | `/chat` 和 `/report` 返回 `matched_rules`、`risk_breakdown`、`ruleset_versions`；`/admin/rules` 可查看版本、启停调权、新增规则和回滚 |
 | **相关文件** | `app/data/risk_rules.json`、`app/data/url_rules.json`、`app/services/risk_engine.py`、`app/services/rule_management.py`、`app/services/intent_recognizer.py` |
-| **可验证证据** | `test_p0_negated_risk_actions_do_not_score_or_set_facts`：否定语义抑制误报；`test_p0_whitelist_uses_domain_boundary`：白名单无后缀绕过；`test_p0_domain_impersonation_and_typosquatting`：域名仿冒检测；`test_p0_rule_matches_expose_version_and_rationale`：版本与依据可见 |
+| **可验证证据** | `test_verification_code_mentions_do_not_false_positive` / `test_refund_mentions_do_not_false_positive`：验证码和退款安全语句不误报；`test_p0_negated_risk_actions_do_not_score_or_set_facts`：否定语义抑制误报；`test_url_risk_uses_independent_thresholds`：URL 独立阈值；`test_p0_domain_impersonation_and_typosquatting`：域名仿冒检测；`test_p0_rule_matches_expose_version_and_rationale`：版本与依据可见 |
 | **配置化证据** | 新增骗局规则可通过管理端在线发布，无需改 Python 代码，也无需重启服务 |
 
 ### 1.3 风险劝阻与举报功能（5 分）
@@ -75,6 +75,7 @@
 | **JSON 配置驱动规则引擎** | 风险规则、URL 规则均从 JSON 文件加载；内置默认规则兜底；运行时支持完整快照热替换、变更审计和回滚 |
 | **规则运营控制台** | 管理端可在线查看规则版本、启停、调权、新增骗局规则、查看历史和回滚，满足赛题“新增骗局快速接入”与工程化运维展示 |
 | **AI 深度伪造诈骗识别** | 新增 AI 换脸、语音克隆、数字人等 18 个触发词，覆盖 2025-2026 年新型 AI 诈骗手法 |
+| **组合规则降低误报** | 验证码、退款/理赔、刷单返利、虚拟币等高频词采用“基础信号 + 多组语义组合”触发，避免普通咨询直接进入中高风险 |
 | **全链路可解释输出** | 每次研判返回规则名、证据、权重、原因、规则版本、规则集版本和依据，并提供多维风险分拆解与下一步动作 |
 | **状态机式多轮反诈对话** | 多轮状态机抽取 14 类事实，新增助学金、航班退改签和主动消除戒心话术；事实抽取同样支持否定语义，避免“没有要求转账”污染跨轮状态 |
 | **情绪感知研判** | 支持传入用户情绪状态（anxious/negative/positive/neutral），情绪信号影响风险评分 |
@@ -90,8 +91,8 @@
 
 | 维度 | 说明 |
 |------|------|
-| **真实场景覆盖** | 覆盖刷单返利、冒充公检法、虚假投资、校园贷、助学金/奖学金、机票退改签、冒充客服、AI 深度伪造等 11 类高频骗局 |
-| **URL 风险检测** | 10 类 URL 结构检查，并增加品牌域名仿冒、白名单边界、IDN/Punycode 规范化与相邻字符交换检测 |
+| **真实场景覆盖** | 覆盖刷单返利、冒充公检法、虚假投资/杀猪盘、虚拟币、注销贷款账户/校园贷、中奖诈骗、助学金/奖学金、机票退改签、冒充客服退款、人社/社保补贴钓鱼、银行账户异常认证、高考招生录取、AI 深度伪造等高频骗局 |
+| **URL 风险检测** | 10 类 URL 结构检查，并增加品牌域名仿冒、白名单边界、IDN/Punycode 规范化与相邻字符交换检测；URL 等级阈值独立于文本规则（medium=12/high=25/critical=45） |
 | **关键词黑名单** | 举报服务内置 20+ 诈骗关键词，覆盖传统话术和新型 AI 诈骗术语 |
 | **一键举报** | `/report` 接口支持 URL + 文本同时提交，返回判定结果、风险分、命中关键词、处置建议 |
 | **历史记录** | `/users/{id}/reports` 查询举报历史，管理员可更新待复核/已复核/已关闭状态；仅保存 URL 主机、脱敏内容摘要与原因，不保存完整敏感内容 |
@@ -106,14 +107,14 @@
 
 | 维度 | 说明 |
 |------|------|
-| **测试覆盖** | 103 个自动化测试（`pytest -q`），覆盖：API、规则引擎、规则热加载与回滚、演示数据初始化、聊天与举报否定语义、域名白名单边界、域名仿冒、离线指标评测、知识库、认证、举报、游戏化、多轮对话与脱敏 |
+| **测试覆盖** | 本次风险规则相关回归 134 个自动化用例通过，覆盖：API、规则引擎、规则热加载与回滚、后台看板、演示数据初始化、聊天与举报否定语义、验证码/退款误报防护、URL 独立阈值、域名白名单边界、域名仿冒、离线指标评测、知识库、认证、举报、游戏化、多轮对话与脱敏 |
 | **测试隔离** | 每个测试使用独立临时数据库（`conftest.py`），测试间零状态污染 |
 | **代码规范** | Pydantic v2 Schema 校验所有入参和出参；类型注解全覆盖；模块化服务架构（RiskEngine、DialogueService、ReportService 独立可测） |
 | **配置管理** | 风险规则 JSON 配置化；规则快照持久化到 SQLite；数据库路径、JWT 密钥、管理员令牌、CORS 来源、限流参数均通过环境变量配置 |
-| **错误降级** | 配置文件缺失时回退内置默认规则；Ollama 未运行时返回降级提示；API 返回统一错误格式 |
+| **错误降级** | 配置文件缺失或损坏时明确记录 `FALLBACK MODE` 并回退到打包 JSON 快照；Ollama 未运行时返回降级提示；API 返回统一错误格式 |
 | **文档完整** | README（部署指南 + 烟雾测试）、SECURITY_DESIGN.md（安全设计）、USAGE_GUIDE.md（交互手册）、SCORING_ALIGNMENT.md（评分映射）、DEMO_SCRIPT.md（答辩脚本） |
 | **前端构建** | `npm run build` 通过，Vite 生产构建，CSS 9.38 KB + JS 64.75 KB（gzip） |
-| **可验证证据** | `pytest -q` → 103 passed；`npm run build` → 生产构建通过 |
+| **可验证证据** | `python -m pytest tests/test_api.py tests/test_rule_evaluation.py tests/test_chat_persistence_and_workflow.py tests/test_dialogue_evidence_state.py tests/test_demo_seed.py` → 134 passed；`scripts/evaluate_rules.py --iterations 100` → 35 个离线规则样本 100% 通过 |
 
 ---
 
@@ -148,7 +149,7 @@
 
 ```bash
 # 后端测试
-pytest -q                           # 103 passed
+pytest -q                           # 106 passed
 
 # 前端构建
 cd frontend && npm run build        # built in ~30s

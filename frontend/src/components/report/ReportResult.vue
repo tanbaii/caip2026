@@ -1,5 +1,5 @@
 <template>
-  <BaseCard padding-class="p-6" class="space-y-6">
+  <BaseCard padding-class="p-6" class="max-h-[min(44rem,calc(100vh-2rem))] min-h-0 space-y-6 overflow-y-auto">
     <div class="flex items-center justify-between gap-4">
       <div>
         <p class="section-kicker">Analysis Result</p>
@@ -26,8 +26,10 @@
 
       <section class="space-y-3">
         <h3 class="text-sm font-black text-slate-900">命中关键词</h3>
-        <div v-if="list(result.matched_keywords).length" class="flex flex-wrap gap-2">
+        <div v-if="list(result.matched_keywords).length" class="max-h-40 overflow-y-auto pr-1">
+          <div class="flex flex-wrap gap-2">
           <span v-for="keyword in list(result.matched_keywords)" :key="keyword" class="max-w-full break-words rounded-full bg-red-50 px-3 py-1.5 text-xs font-black text-red-700 shadow-sm shadow-red-100 ring-1 ring-red-100">{{ keyword }}</span>
+          </div>
         </div>
         <p v-else class="rounded-2xl bg-slate-50 p-4 text-sm font-semibold text-slate-400">暂无关键词命中。</p>
       </section>
@@ -37,13 +39,13 @@
 
       <section class="space-y-3">
         <h3 class="text-sm font-black text-slate-900">命中规则</h3>
-        <div v-if="list(result.matched_rules).length" class="space-y-2">
+        <div v-if="list(result.matched_rules).length" class="max-h-80 space-y-2 overflow-y-auto pr-1">
           <div v-for="(rule, index) in list(result.matched_rules)" :key="index" class="rounded-2xl border border-slate-100 bg-white p-3">
             <div class="flex items-center justify-between gap-2">
               <span class="min-w-0 truncate text-sm font-black text-slate-800">{{ ruleName(rule.rule) }}</span>
               <span class="shrink-0 rounded-full px-2 py-0.5 text-xs font-black" :class="weightClass(rule.weight)">+{{ rule.weight }}</span>
             </div>
-            <p class="mt-1 text-xs font-semibold leading-5 text-slate-500">{{ rule.reason }}</p>
+            <p class="mt-1 break-words text-xs font-semibold leading-5 text-slate-500">{{ rule.reason }}</p>
             <p v-if="rule.rule_version || rule.ruleset_version" class="mt-1 text-[11px] font-black text-slate-400">
               规则 v{{ rule.rule_version || '-' }} · 规则集 v{{ rule.ruleset_version || '-' }}
             </p>
@@ -52,7 +54,7 @@
             </div>
             <details v-if="rule.rationale" class="mt-2 text-xs text-slate-500">
               <summary class="cursor-pointer font-black text-blue-600">查看判定依据</summary>
-              <p class="mt-1 font-semibold leading-5">{{ rule.rationale }}</p>
+              <p class="mt-1 break-words font-semibold leading-5">{{ rule.rationale }}</p>
             </details>
           </div>
         </div>
@@ -88,7 +90,7 @@ const ResultList = {
   template: `
     <section class="space-y-3">
       <h3 class="text-sm font-black text-slate-900">{{ title }}</h3>
-      <ol v-if="items.length" class="space-y-2">
+      <ol v-if="items.length" class="max-h-64 space-y-2 overflow-y-auto pr-1">
         <li v-for="(item, index) in items" :key="index" class="flex gap-3 rounded-2xl border border-slate-100 bg-slate-50/80 p-3 text-sm font-semibold leading-6 text-slate-600">
           <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-600 text-xs font-black text-white">{{ index + 1 }}</span>
           <span class="min-w-0 break-words">{{ item }}</span>

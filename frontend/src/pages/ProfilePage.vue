@@ -42,7 +42,7 @@
 
         <section class="space-y-3">
           <h3 class="text-lg font-black text-slate-900">徽章</h3>
-          <div class="grid gap-3 sm:grid-cols-2">
+          <div class="grid max-h-72 gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
             <div v-for="badge in list(progress.badges)" :key="badge" class="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm font-black text-blue-700 shadow-sm shadow-blue-100/70">{{ badge }}</div>
             <div v-if="!list(progress.badges).length" class="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black text-slate-400">暂无徽章</div>
           </div>
@@ -53,10 +53,10 @@
             <h3 class="text-lg font-black text-slate-900">关卡成绩</h3>
             <span class="text-xs font-black text-slate-400">只奖励首次通关与最佳成绩增量</span>
           </div>
-          <div class="grid gap-3 sm:grid-cols-2">
+          <div class="grid max-h-96 gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
             <div v-for="item in list(progress.scenario_progress)" :key="item.scenario_id" class="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
               <div class="flex items-center justify-between gap-3">
-                <p class="font-black text-slate-900">{{ item.scenario_id }}</p>
+                <p class="break-all font-black text-slate-900">{{ item.scenario_id }}</p>
                 <span class="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-black text-emerald-700">最佳 {{ item.best_percent }}%</span>
               </div>
               <p class="mt-2 text-sm font-bold text-slate-600">{{ item.best_score }}/{{ item.max_score }} 分 · 挑战 {{ item.attempts }} 次</p>

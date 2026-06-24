@@ -6,7 +6,7 @@ from app.services.ai_risk_service import (
 )
 
 
-def test_ai_assessment_can_escalate_rule_score() -> None:
+def test_ai_assessment_is_advisory_by_default() -> None:
     merged = merge_rule_and_ai_risk(
         rule_score=25,
         rule_level="medium",
@@ -20,9 +20,32 @@ def test_ai_assessment_can_escalate_rule_score() -> None:
         ),
     )
 
-    assert merged.final_score == 82
-    assert merged.final_level == "critical"
-    assert merged.ai_score_delta == 57
+    assert merged.final_score == 25
+    assert merged.final_level == "medium"
+    assert merged.ai_score_delta == 0
+    assert merged.decision == "ai_observed"
+    assert merged.matched_rule is None
+
+
+def test_ai_assessment_escalation_is_explicit_and_bounded() -> None:
+    merged = merge_rule_and_ai_risk(
+        rule_score=25,
+        rule_level="medium",
+        ai_assessment=AIRiskAssessment(
+            risk_level="critical",
+            risk_score=82,
+            confidence=0.86,
+            fraud_stage="money_lost",
+            reasons=["用户明确说钱已经被转走"],
+            recommended_actions=["联系银行止付", "报警"],
+        ),
+        allow_score_escalation=True,
+        max_escalation_delta=10,
+    )
+
+    assert merged.final_score == 35
+    assert merged.final_level == "medium"
+    assert merged.ai_score_delta == 10
     assert merged.matched_rule["rule"] == "ai_risk_assessment"
 
 

@@ -145,8 +145,21 @@ curl -s -X POST http://127.0.0.1:8000/report \
 预期关键字段：
 
 - `verdict`
+- `risk_level`
 - `risk_score`
+- `score_breakdown`
+- `matched_rules`
 - `matched_keywords`
+
+举报中心现在以 SQLite 为唯一事实来源，不再维护内存举报列表。`/report` 会复用 `risk_rules.json` / `RiskEngine` 的文本规则和 URL 规则进行分析，命中项返回可追溯的 `rule`、`rule_version`、`ruleset_version` 与 `rationale`。举报等级与聊天一致，统一为 `low` / `medium` / `high` / `critical`；为兼容旧前端仍返回 `verdict`：`low -> safe`，`medium -> suspicious`，`high|critical -> high_risk`。
+
+新增闭环能力：
+
+- `POST /report` 会保存 `channel`、原始 `url/content`、`risk_level`、`score_breakdown`、`matched_rules`、`url_flags`、`reasons`、`status`、`created_at/updated_at`。
+- 同一用户 24 小时内重复提交同一规范化 URL 或同一内容 hash，会返回已有 `report_id` 且 `duplicated=true`；不同用户不互相去重。
+- `/report` 有轻量限流，超限返回 `429`，管理员查询接口不受影响。
+- `GET /reports/{report_id}` 返回完整举报详情。
+- `/chat` 在 `high` 或 `critical` 时返回 `report_prefill`，前端风险面板显示“一键举报”，但必须由用户确认提交，不会自动举报。
 
 ### 3.4 闯关
 
@@ -186,6 +199,8 @@ curl -s "http://127.0.0.1:8000/leaderboard?top=20"
 `POST /knowledge/scams` 需要请求头 `x-admin-token`。
 
 管理员还可通过 `PATCH /reports/{report_id}/status` 将举报标记为 `pending`、`reviewed` 或 `closed`。
+
+管理员还可通过 `GET /admin/reports` 查看全局举报列表，支持 `page`、`page_size`、`status`、`risk_level`、`verdict`、`channel`、`user_id`、`keyword`、`start_time`、`end_time` 筛选，默认按 `created_at` 倒序。当前项目仍是共享 `x-admin-token` 管理入口，尚未实现真正的管理员角色鉴权。
 
 ```bash
 curl -s -X POST http://127.0.0.1:8000/knowledge/scams \
@@ -260,6 +275,8 @@ python scripts/seed_demo_data.py --reset
 
 - `/profile`：查看积分、等级、勋章与闯关进度；
 - `/report`：查看举报记录与状态；
+- `/admin`：输入管理员令牌，通过校验后进入后台运营看板；
+- `/admin/dashboard`：查看后台运营看板，包括举报态势、Top 关键词/域名、学习效果、知识来源覆盖和规则状态；
 - `/admin/rules`：查看“新增快递理赔规则、临时调权、回滚”的规则审计轨迹。
 
 ---
@@ -272,11 +289,11 @@ python scripts/seed_demo_data.py --reset
 pytest -q
 ```
 
-当前仓库实测结果：**103 个通过，0 个失败**
+自动化测试覆盖 API、规则引擎、规则热加载、后台看板、演示数据、游戏化、脱敏与离线评测等；本次风险规则相关回归 **134 个用例通过**。本机若 Python 环境可用，执行 `pytest -q` 进行完整验证。
 
 ### 8.1 规则离线评测
 
-仓库内置文本与 URL 风险规则回归集，覆盖刷单返利、游戏交易、冒充公检法、虚假投资、校园贷、助学金、机票退改签、否定语义、白名单边界和域名仿冒。评测会输出准确率、精确率、召回率、F1、误报率、规则断言通过率和 P95 延迟：
+仓库内置文本与 URL 风险规则回归集，覆盖刷单返利、游戏交易、冒充公检法、虚假投资、虚拟币、注销贷款账户/校园贷、中奖诈骗、助学金、机票退改签、人社/社保补贴钓鱼、银行账户异常认证、高考招生录取诈骗、验证码/退款安全反例、否定语义、白名单边界和域名仿冒。评测会输出准确率、精确率、召回率、F1、误报率、规则断言通过率和 P95 延迟：
 
 ```bash
 python scripts/evaluate_rules.py \
@@ -289,23 +306,30 @@ python scripts/evaluate_rules.py \
 
 ### 8.2 规则管理与热加载
 
-登录后访问 `/admin/rules` 可打开规则控制台。管理接口使用 `ANTI_FRAUD_ADMIN_TOKEN` 对应的 `X-Admin-Token` 鉴权，支持：
+登录后访问 `/admin` 可打开管理端入口。前端会先校验 `ANTI_FRAUD_ADMIN_TOKEN` 对应的 `X-Admin-Token`，校验通过后才在侧边栏显示“后台看板”和“规则管理”。后端管理接口仍强制校验 `X-Admin-Token`，前端隐藏菜单只是体验层权限控制。
+
+访问 `/admin/rules` 可打开规则控制台，支持：
 
 - 查看当前文本规则集、URL 规则集版本及生效修订；
 - 在线启停规则、调整 0-100 权重；
 - 新增可配置文本骗局规则并立即进入聊天和举报研判链路；
 - 查看 SQLite 中的不可变变更记录，并将任意历史快照回滚为新的生效修订；
-- 发布前校验规则名称、触发词、权重、URL condition、正则和风险等级阈值。
+- 发布前校验规则名称、触发词、组合触发组、权重、URL condition、正则和风险等级阈值。
 
 热加载采用完整运行时快照替换，同一服务进程中的现有 `DialogueService` 与 `ReportService` 无需重建。生产部署建议使用单进程应用实例，或在多实例环境中增加配置发布消息通知。
 
+访问 `/admin/dashboard` 可打开后台运营看板，聚合注册用户、举报风险分布、待处理队列、Top 关键词/域名、闯关学习效果、知识来源覆盖和当前规则版本。看板接口只返回脱敏后的举报摘要与 URL host，不返回原始举报文本。
+
 ### 规则与知识库版本
 
-- 文本规则集当前版本为 `2.1.0`，URL 规则集为 `2.2.0`；接口通过 `ruleset_versions` 返回实际加载版本。
+- 文本规则集当前版本为 `2.4.0`，URL 规则集为 `2.4.0`；接口通过 `ruleset_versions` 返回实际加载版本。
 - 每条命中规则返回 `rule_version`、`ruleset_version` 和 `rationale`，前端可展开查看判定依据。
-- 知识库新增助学金/奖学金、机票退改签条目；闯关新增 `C010` 机票退改签场景。
-- 否定语义只在同一分句和有限窗口内生效，例如“没有要求转账”“不要提供验证码”不会被当作风险行为。
+- 知识库新增助学金/奖学金、机票退改签、人社/社保补贴钓鱼、银行账户异常认证、高考招生录取诈骗条目；闯关新增 `C010` 机票退改签场景。
+- 新增条目支持 `sources` 字段，保留 12321、12377 等公开来源的标题、机构、URL 和采集日期；知识页会直接展示权威来源链接。
+- 验证码与退款类规则采用“低权重基础信号 + 组合触发”策略，例如“我收到了验证码”“我想申请退款”保持低风险；“提供验证码解冻账户”“退款前先交保证金”才升级。
+- 否定语义只在同一分句和有限窗口内生效，例如“没有要求转账”“不要提供验证码”“验证码不能告诉别人”不会被当作风险行为。
 - URL 白名单采用主域名边界匹配，`service.edu.cn` 可命中，`evilgov.cn` 不会冒充 `gov.cn` 进入白名单。
+- URL 规则使用独立等级阈值：`medium=12`、`high=25`、`critical=45`，避免沿用文本阈值低估链接结构风险。
 
 ### 游戏化积分规则
 

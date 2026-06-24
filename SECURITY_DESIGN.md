@@ -56,6 +56,7 @@
 | `/chat`、`/chat/reset`、`/report`、`/scenarios/*` | 默认需要 Bearer Token，且 Token 用户必须与 `user_id` 一致 |
 | `/auth/me` | 需要 `Authorization: Bearer <token>` |
 | `/knowledge/scams`（POST） | 需要 `x-admin-token` 管理员令牌 |
+| `/admin/dashboard/*` | 需要 `x-admin-token` 管理员令牌，用于后台运营看板聚合数据 |
 | `/admin/rules/*` | 需要 `x-admin-token` 管理员令牌，用于规则版本查看、启停、调权、新增和回滚 |
 | `/users/*/progress`、`/users/*/reports` | 默认需要 Bearer Token，并阻止跨用户读取 |
 | `/leaderboard`、知识库只读接口、关卡列表 | 公开只读 |
@@ -69,15 +70,17 @@
 ### 3.1 令牌管理
 
 - 管理员令牌通过环境变量 `ANTI_FRAUD_ADMIN_TOKEN` 配置
-- 默认值 `change-me` 仅用于开发，生产环境必须替换
+- 未配置时管理接口 fail-closed，不接受默认 `change-me`
 - 令牌通过请求头 `x-admin-token` 传递，不在 URL 或 Body 中出现
-- Vue 规则管理页只把管理员令牌保存在 `sessionStorage`，关闭浏览器会话后失效
+- Vue 管理端入口 `/admin` 先校验管理员令牌，校验通过后才显示“后台看板”和“规则管理”菜单
+- Vue 管理端只把管理员令牌保存在 `sessionStorage`，关闭浏览器会话后失效
 - 管理接口 401 不会清理普通用户登录态，避免管理员令牌输错导致演示账号退出
 
 ### 3.2 受限操作
 
 - 管理员知识接口：`POST /knowledge/scams`（新增骗局知识条目）
 - 举报复核接口：`PATCH /reports/{report_id}/status`，仅允许管理员更新处理状态
+- 后台看板接口：`/admin/dashboard/*`，只返回运营聚合数据、脱敏举报摘要和 URL host
 - 规则管理接口：`/admin/rules/*`，支持查看版本、启停、调权、新增文本规则和回滚历史快照
 - 令牌不匹配时返回 `401 Unauthorized`
 - 不提供用户管理、真实数据删除等高危管理员功能
@@ -152,7 +155,10 @@
 
 ### 6.4 规则热加载安全边界
 
-- 发布前校验规则名称、权重范围、触发词、URL condition、正则表达式和风险等级阈值。
+- 发布前校验规则名称、权重范围、触发词、组合触发组、URL condition、正则表达式和风险等级阈值。
+- 配置缺失或损坏时会明确记录 `FALLBACK MODE`，并回退到与打包 JSON 同步的默认规则快照；`validate_configs` 会 warning 默认规则 id 与加载规则 id 的漂移。
+- 验证码、退款/理赔等高误报词采用低权重基础信号与组合触发，降低“收到验证码”“申请退款”等普通语句误报。
+- URL 风险等级使用独立阈值（medium=12/high=25/critical=45），不沿用文本规则阈值。
 - 运行时采用完整配置快照替换，避免半更新状态污染正在处理的请求。
 - 回滚不会删除历史，而是用目标快照生成新的生效修订，保留审计链。
 - 当前热加载在单进程内立即生效；多进程或多实例部署时，需要额外配置发布通知或重启策略。
@@ -237,6 +243,12 @@ export CORS_ORIGINS="https://your-domain.com,https://www.your-domain.com"
 |-------|------|-------|
 | `DB_PATH` | SQLite 数据库路径 | `app/data/anti_fraud.db` |
 | `JWT_SECRET` | JWT 签名密钥 | 内置开发密钥 |
-| `ANTI_FRAUD_ADMIN_TOKEN` | 管理员接口令牌 | `change-me` |
+| `ANTI_FRAUD_ADMIN_TOKEN` | 管理员接口令牌 | 无默认可用值，未配置则管理接口返回 503 |
 | `CORS_ORIGINS` | CORS 允许来源（逗号分隔） | localhost 开发地址 |
 | `RATE_LIMIT_RPM` | 每分钟请求限制（0=禁用） | `0` |
+
+## 本轮举报中心安全修正
+
+- `ANTI_FRAUD_ADMIN_TOKEN` 现在没有默认可用值。环境变量未设置时，所有 `x-admin-token` 管理接口 fail-closed 并返回 `503`；`change-me` 不再拥有管理员权限。
+- `GET /reports/{report_id}` 返回原始举报内容、URL、hash、规则命中等敏感字段，因此必须鉴权：未登录返回 `401`；普通用户只能读取自己的举报；管理员可通过 `X-Admin-Token` 读取全量详情。
+- 当前管理员能力仍复用共享 `x-admin-token`，不是完整 RBAC。TODO：接入真实管理员账号/角色鉴权后，替换共享令牌。

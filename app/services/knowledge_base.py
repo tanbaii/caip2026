@@ -19,12 +19,51 @@ class KnowledgeBase:
             json.dump(self._data, fp, ensure_ascii=False, indent=2)
 
     @property
+    def meta(self) -> dict[str, Any]:
+        return self._data.get("_meta", {})
+
+    @property
     def scams(self) -> list[dict[str, Any]]:
         return self._data.get("scams", [])
 
     @property
     def laws(self) -> list[dict[str, Any]]:
         return self._data.get("laws", [])
+
+    @property
+    def response_playbooks(self) -> list[dict[str, Any]]:
+        return self._data.get("response_playbooks", [])
+
+    @property
+    def faqs(self) -> list[dict[str, Any]]:
+        return self._data.get("faqs", [])
+
+    def quality_report(self) -> dict[str, Any]:
+        required_fields = self.meta.get("required_fields", [])
+        missing_required: list[dict[str, str]] = []
+        sourced_count = 0
+
+        for scam in self.scams:
+            scam_id = str(scam.get("id") or scam.get("type") or "unknown")
+            for field in required_fields:
+                if not scam.get(field):
+                    missing_required.append({"id": scam_id, "field": str(field)})
+            if scam.get("sources"):
+                sourced_count += 1
+
+        scam_count = len(self.scams)
+        return {
+            "schema_version": self.meta.get("schema_version"),
+            "updated": self.meta.get("updated"),
+            "coverage": self.meta.get("coverage", []),
+            "scam_count": scam_count,
+            "law_count": len(self.laws),
+            "playbook_count": len(self.response_playbooks),
+            "faq_count": len(self.faqs),
+            "sourced_scam_count": sourced_count,
+            "source_coverage": round(sourced_count / scam_count, 4) if scam_count else 0,
+            "missing_required_fields": missing_required,
+        }
 
     def search_scams(self, text: str, limit: int = 3) -> list[dict[str, Any]]:
         text_lower = text.lower()

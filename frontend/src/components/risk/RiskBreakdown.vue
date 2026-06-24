@@ -1,7 +1,7 @@
 <template>
   <section v-if="hasScores" class="space-y-3">
     <h3 class="text-sm font-black text-slate-900">风险分构成</h3>
-    <div class="space-y-2">
+    <div class="max-h-56 space-y-2 overflow-y-auto pr-1">
       <div v-for="dim in dimensions" :key="dim.key" class="flex items-center gap-3 text-sm">
         <span class="w-20 shrink-0 text-xs font-bold text-slate-500">{{ dim.label }}</span>
         <div class="flex-1 min-w-0 h-2 overflow-hidden rounded-full bg-slate-100">

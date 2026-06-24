@@ -71,6 +71,10 @@ class IntentRecognizer:
         history: list[dict[str, str]] | None = None,
     ) -> tuple[str, list[str], dict[str, int]]:
         text = message.lower()
+        pii_intent = self._detect_pii_or_emergency_intent(text, history or [])
+        if pii_intent:
+            return pii_intent, [], {pii_intent: 10}
+
         scores: dict[str, int] = defaultdict(int)
         matched_keywords: list[str] = []
 
@@ -96,3 +100,33 @@ class IntentRecognizer:
 
         intent = max(scores.items(), key=lambda item: item[1])[0]
         return intent, sorted(set(matched_keywords)), dict(scores)
+
+    @staticmethod
+    def _detect_pii_or_emergency_intent(
+        text: str,
+        history: list[dict[str, str]],
+    ) -> str:
+        has_phone = "手机号" in text or "手机号码" in text or "电话" in text
+        has_pii = has_phone or any(token in text for token in ("身份证", "身份证号", "地址", "住址", "银行卡"))
+        has_code = "验证码" in text or "短信码" in text or "动态码" in text
+        has_remote = "屏幕共享" in text or "共享屏幕" in text or "远程控制" in text
+        third_party = any(token in text for token in ("对方", "陌生人", "客服", "骗子", "他", "她"))
+        request = any(token in text for token in ("问我要", "问我的", "问我", "要我", "让我", "要求", "索要"))
+
+        if has_code and any(token in text for token in ("发给", "给他", "给对方", "告诉", "看验证码", "问我要", "要我", "让我")):
+            return "credential_leakage_emergency"
+        if has_remote and has_code:
+            return "active_remote_control"
+        if has_remote and any(token in text for token in ("正在", "已经", "开了", "开启", "打开")):
+            return "active_remote_control"
+
+        if has_pii and third_party and request:
+            return "third_party_pii_request"
+        if has_pii and any(token in text for token in ("发给他", "发给对方", "告诉他", "告诉对方")):
+            return "pii_disclosure_warning"
+        if has_pii and any(token in text for token in ("我的手机号是多少", "我手机号是多少", "刚才的手机号")):
+            return "self_pii_recall"
+
+        if has_phone and ("我的手机号" in text and re.search(r"1[3-9]\d{9}", text)):
+            return "self_pii_provide"
+        return ""
