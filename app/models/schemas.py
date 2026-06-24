@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class UserProfile(BaseModel):
@@ -13,6 +13,7 @@ class UserProfile(BaseModel):
 
 class ChatRequest(BaseModel):
     user_id: int = Field(ge=1)
+    conversation_id: str | None = Field(default=None, max_length=64)
     message: str = Field(min_length=1, max_length=1000)
     channel: Literal["web", "miniapp", "mobile", "voice"] = "web"
     emotion: Literal["positive", "neutral", "negative", "anxious"] | None = None
@@ -21,6 +22,8 @@ class ChatRequest(BaseModel):
 
 
 class ChatResponse(BaseModel):
+    conversation_id: str = ""
+    emotion: Literal["positive", "neutral", "negative", "anxious"] = "neutral"
     reply: str
     intent: str
     matched_scams: list[str]
@@ -49,15 +52,44 @@ class ChatResponse(BaseModel):
     turn_count: int = 0
     retrieved_knowledge: list[dict[str, Any]] = Field(default_factory=list)
     ruleset_versions: dict[str, str] = Field(default_factory=dict)
+    report_prefill: dict[str, Any] | None = None
 
 
 class ChatResetRequest(BaseModel):
     user_id: int = Field(ge=1)
+    conversation_id: str | None = Field(default=None, max_length=64)
+
+
+class ChatConversationCreateResponse(BaseModel):
+    conversation_id: str
+    user_id: int
+    title: str
+    created_at: str
+    updated_at: str
+
+
+class ChatConversationSummary(BaseModel):
+    conversation_id: str
+    user_id: int
+    title: str
+    message_count: int
+    risk_level: Literal["low", "medium", "high", "critical"] = "low"
+    risk_score: int = 0
+    preview: str = ""
+    created_at: str
+    updated_at: str
+
+
+class ChatConversationListResponse(BaseModel):
+    user_id: int
+    total: int
+    items: list[ChatConversationSummary]
 
 
 class ChatHistoryItem(BaseModel):
     id: int
     user_id: int
+    conversation_id: str = ""
     user_message: str
     assistant_reply: str
     risk_level: Literal["low", "medium", "high", "critical"]
@@ -74,11 +106,22 @@ class ChatHistoryResponse(BaseModel):
     items: list[ChatHistoryItem]
 
 
+class ChatConversationMessagesResponse(BaseModel):
+    user_id: int
+    conversation_id: str
+    messages: list[ChatHistoryItem]
+
+
 class ReportRequest(BaseModel):
     user_id: int = Field(ge=1)
     url: str | None = Field(default=None, max_length=2048)
     content: str | None = Field(default=None, max_length=2000)
     channel: Literal["web", "miniapp", "mobile"] = "web"
+    user_role: Literal["student", "general"] = "general"
+    emotion: Literal["positive", "neutral", "negative", "anxious"] | None = None
+    chat_risk_level: Literal["low", "medium", "high", "critical"] | None = None
+    chat_risk_score: int | None = Field(default=None, ge=0, le=100)
+    chat_context: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def require_url_or_content(self) -> "ReportRequest":
@@ -89,13 +132,18 @@ class ReportRequest(BaseModel):
 
 class ReportResponse(BaseModel):
     report_id: str
+    duplicated: bool = False
+    channel: Literal["web", "miniapp", "mobile"] = "web"
+    risk_level: Literal["low", "medium", "high", "critical"] = "low"
     verdict: Literal["safe", "suspicious", "high_risk"]
     risk_score: int
+    score: int | None = None
     reasons: list[str]
     recommendations: list[str]
     matched_keywords: list[str]
     url_flags: list[str]
     matched_rules: list[dict[str, Any]] = Field(default_factory=list)
+    score_breakdown: dict[str, Any] = Field(default_factory=dict)
     risk_breakdown: dict[str, Any] = Field(default_factory=dict)
     next_actions: list[str] = Field(default_factory=list)
     status: Literal["pending", "reviewed", "closed"] = "pending"
@@ -106,13 +154,21 @@ class ReportHistoryItem(BaseModel):
     report_id: str
     user_id: int
     score: int
+    risk_score: int | None = None
+    risk_level: Literal["low", "medium", "high", "critical"] = "low"
     verdict: Literal["safe", "suspicious", "high_risk"]
+    channel: Literal["web", "miniapp", "mobile"] = "web"
     matched_keywords: list[str]
     url_host: str | None = None
+    url: str | None = None
     content_summary: str | None = None
     reasons: list[str] = Field(default_factory=list)
     status: Literal["pending", "reviewed", "closed"] = "pending"
+    reviewer: str | None = None
+    review_note: str | None = None
+    reviewed_at: str | None = None
     created_at: str
+    updated_at: str | None = None
 
 
 class ReportHistoryResponse(BaseModel):
@@ -121,8 +177,43 @@ class ReportHistoryResponse(BaseModel):
     items: list[ReportHistoryItem]
 
 
+class ReportDetailResponse(ReportHistoryItem):
+    content: str | None = None
+    normalized_url: str | None = None
+    content_hash: str | None = None
+    matched_rules: list[dict[str, Any]] = Field(default_factory=list)
+    url_flags: list[str] = Field(default_factory=list)
+    score_breakdown: dict[str, Any] = Field(default_factory=dict)
+    risk_breakdown: dict[str, Any] = Field(default_factory=dict)
+    ruleset_versions: dict[str, str] = Field(default_factory=dict)
+
+
+class AdminReportsResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: list[ReportDetailResponse]
+
+
 class ReportStatusUpdate(BaseModel):
     status: Literal["pending", "reviewed", "closed"]
+
+
+class ReportReviewRequest(BaseModel):
+    status: Literal["reviewed", "closed"] = "reviewed"
+    reviewer: str | None = Field(default=None, max_length=64)
+    review_note: str | None = Field(default=None, max_length=500)
+    verdict: Literal["safe", "suspicious", "high_risk"] | None = None
+    risk_level: Literal["low", "medium", "high", "critical"] | None = None
+    score: int | None = Field(default=None, ge=0, le=100)
+
+    @field_validator("reviewer", "review_note", mode="before")
+    @classmethod
+    def normalize_optional_text(cls, value: object) -> str | None:
+        if value is None:
+            return None
+        text = str(value).strip()
+        return text or None
 
 
 class ScamEntryCreate(BaseModel):

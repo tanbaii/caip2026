@@ -109,7 +109,7 @@
             </div>
             <StatusBadge tone="warning">pending {{ statusCount('pending') }}</StatusBadge>
           </div>
-          <div v-if="summary.reports.recent.length" class="divide-y divide-slate-100">
+          <div v-if="summary.reports.recent.length" class="max-h-[36rem] divide-y divide-slate-100 overflow-y-auto">
             <article v-for="item in summary.reports.recent" :key="item.report_id" class="grid gap-4 p-5 xl:grid-cols-[1fr_130px] xl:items-center">
               <div class="min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
@@ -118,8 +118,63 @@
                   <StatusBadge :tone="statusTone(item.status)">{{ statusLabel(item.status) }}</StatusBadge>
                   <span class="text-xs font-bold text-slate-400">user #{{ item.user_id }} · {{ item.created_at }}</span>
                 </div>
-                <p class="mt-2 break-words text-sm font-bold text-slate-700">{{ item.url_host || item.content_summary || '无 URL / 无摘要' }}</p>
+                <p class="mt-2 break-all text-sm font-bold text-slate-700">{{ item.url_host || item.content_summary || '无 URL / 无摘要' }}</p>
                 <p v-if="item.reasons?.length" class="mt-1 line-clamp-2 text-xs font-semibold leading-5 text-slate-400">{{ item.reasons.join('；') }}</p>
+                <div class="mt-4 rounded-2xl border border-slate-100 bg-slate-50/80 p-3">
+                  <div class="grid gap-3 lg:grid-cols-[1fr_auto] lg:items-end">
+                    <div class="min-w-0 space-y-3">
+                      <div class="flex flex-wrap gap-2">
+                        <button
+                          v-for="option in reviewVerdictOptions"
+                          :key="option.value"
+                          type="button"
+                          class="rounded-xl px-3 py-2 text-xs font-black transition"
+                          :class="draftFor(item).verdict === option.value ? option.activeClass : 'bg-white text-slate-500 ring-1 ring-slate-200 hover:text-slate-900'"
+                          @click="setDraftVerdict(item.report_id, option.value)"
+                        >
+                          {{ option.label }}
+                        </button>
+                      </div>
+                      <textarea
+                        :value="draftFor(item).review_note"
+                        class="focus-ring min-h-20 w-full resize-none rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-bold leading-5 text-slate-700"
+                        maxlength="500"
+                        placeholder="复核备注：例如已电话核实、误报、已建议用户报警..."
+                        @input="setDraftNote(item.report_id, $event.target.value)"
+                      />
+                    </div>
+                    <div class="flex flex-wrap gap-2 lg:flex-col">
+                      <button
+                        type="button"
+                        class="rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        :disabled="reviewingReportId === item.report_id"
+                        @click="submitReview(item, 'reviewed')"
+                      >
+                        {{ reviewingReportId === item.report_id ? '提交中' : '复核通过' }}
+                      </button>
+                      <button
+                        type="button"
+                        class="rounded-xl bg-slate-900 px-4 py-2 text-xs font-black text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        :disabled="reviewingReportId === item.report_id"
+                        @click="submitReview(item, 'closed')"
+                      >
+                        关闭归档
+                      </button>
+                    </div>
+                  </div>
+                  <p
+                    v-if="feedbackFor(item.report_id)"
+                    class="mt-3 rounded-xl px-3 py-2 text-xs font-black ring-1"
+                    :class="feedbackFor(item.report_id).tone === 'error' ? 'bg-red-50 text-red-700 ring-red-100' : 'bg-emerald-50 text-emerald-700 ring-emerald-100'"
+                  >
+                    {{ feedbackFor(item.report_id).text }}
+                  </p>
+                  <div v-if="item.review_note || item.reviewed_at" class="mt-3 rounded-xl bg-white p-3 text-xs font-bold text-slate-600 ring-1 ring-slate-200">
+                    <p class="text-[11px] font-black uppercase tracking-widest text-slate-400">{{ savedReviewLabel }}</p>
+                    <p v-if="item.review_note" class="mt-1 break-words leading-5 text-slate-700">{{ item.review_note }}</p>
+                    <p class="mt-1 break-words text-[11px] font-semibold text-slate-400">{{ reviewMetaText(item) }}</p>
+                  </div>
+                </div>
               </div>
               <div class="text-left xl:text-right">
                 <p class="text-xs font-black uppercase tracking-widest text-slate-400">Risk Score</p>
@@ -137,7 +192,7 @@
             <p class="section-kicker">Learning Loop</p>
             <h2 class="mt-1 text-2xl font-black text-slate-950">闯关学习效果</h2>
           </div>
-          <div v-if="summary.scenarios.length" class="space-y-3">
+          <div v-if="summary.scenarios.length" class="max-h-96 space-y-3 overflow-y-auto pr-1">
             <article v-for="item in summary.scenarios" :key="item.scenario_id" class="rounded-3xl border border-slate-100 bg-slate-50 p-4">
               <div class="flex items-center justify-between gap-3">
                 <strong class="text-sm font-black text-slate-900">{{ item.scenario_id }}</strong>
@@ -178,7 +233,7 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { Gauge } from 'lucide-vue-next'
-import { getDashboardSummary } from '../api/dashboard.js'
+import { getDashboardSummary, reviewReport } from '../api/dashboard.js'
 import { useAdminAuth } from '../composables/useAdminAuth.js'
 import BaseCard from '../components/common/BaseCard.vue'
 import StatusBadge from '../components/common/StatusBadge.vue'
@@ -189,7 +244,17 @@ const loading = ref(false)
 const summary = ref(null)
 const message = ref('')
 const messageTone = ref('success')
+const reviewDrafts = ref({})
+const reviewFeedbacks = ref({})
+const reviewingReportId = ref('')
 
+const reviewVerdictOptions = [
+  { value: 'safe', label: '安全', riskLevel: 'low', score: 15, activeClass: 'bg-emerald-600 text-white shadow-sm shadow-emerald-200' },
+  { value: 'suspicious', label: '可疑', riskLevel: 'medium', score: 55, activeClass: 'bg-amber-500 text-white shadow-sm shadow-amber-200' },
+  { value: 'high_risk', label: '高危', riskLevel: 'high', score: 88, activeClass: 'bg-red-600 text-white shadow-sm shadow-red-200' },
+]
+
+const savedReviewLabel = '\u5df2\u4fdd\u5b58\u590d\u6838'
 const maxTrendTotal = computed(() => Math.max(1, ...((summary.value?.reports?.trend || []).map((item) => item.total))))
 const levelItems = computed(() => (summary.value?.users?.level_distribution || []).map((item) => ({ ...item, label: `Lv.${item.level}` })))
 
@@ -215,12 +280,116 @@ const SignalList = {
       return Math.max(1, ...(this.items || []).map((item) => Number(item[this.valueKey] || 0)))
     },
   },
-  template: `<section><div class="mb-3 flex items-center justify-between"><h3 class="text-sm font-black text-slate-900">{{ title }}</h3><span class="text-xs font-bold text-slate-400">Top {{ (items || []).length }}</span></div><div v-if="items?.length" class="space-y-3"><div v-for="item in items" :key="item[labelKey]" class="grid grid-cols-[minmax(0,1fr)_52px] items-center gap-3"><div class="min-w-0"><p class="truncate text-sm font-black text-slate-700">{{ item[labelKey] }}</p><div class="mt-1 h-2 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-slate-900" :style="{ width: Math.round(Number(item[valueKey] || 0) / maxValue * 100) + '%' }"></div></div></div><span class="text-right text-sm font-black text-slate-900">{{ item[valueKey] }}</span></div></div><p v-else class="rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-400">{{ empty }}</p></section>`,
+  template: `<section><div class="mb-3 flex items-center justify-between"><h3 class="text-sm font-black text-slate-900">{{ title }}</h3><span class="text-xs font-bold text-slate-400">Top {{ (items || []).length }}</span></div><div v-if="items?.length" class="max-h-64 space-y-3 overflow-y-auto pr-1"><div v-for="item in items" :key="item[labelKey]" class="grid grid-cols-[minmax(0,1fr)_52px] items-center gap-3"><div class="min-w-0"><p class="truncate text-sm font-black text-slate-700">{{ item[labelKey] }}</p><div class="mt-1 h-2 overflow-hidden rounded-full bg-slate-100"><div class="h-full rounded-full bg-slate-900" :style="{ width: Math.round(Number(item[valueKey] || 0) / maxValue * 100) + '%' }"></div></div></div><span class="text-right text-sm font-black text-slate-900">{{ item[valueKey] }}</span></div></div><p v-else class="rounded-2xl bg-slate-50 p-4 text-sm font-bold text-slate-400">{{ empty }}</p></section>`,
 }
 
 function notify(text, tone = 'success') {
   message.value = text
   messageTone.value = tone
+}
+
+function reviewOption(verdict) {
+  return reviewVerdictOptions.find((option) => option.value === verdict) || reviewVerdictOptions[1]
+}
+
+function draftFor(item) {
+  const reportId = String(item.report_id)
+  if (!reviewDrafts.value[reportId]) {
+    const option = reviewOption(item.verdict)
+    reviewDrafts.value = {
+      ...reviewDrafts.value,
+      [reportId]: {
+        verdict: option.value,
+        review_note: item.review_note || '',
+        reviewer: item.reviewer || 'admin',
+      },
+    }
+  }
+  return reviewDrafts.value[reportId]
+}
+
+function updateDraft(reportId, patch) {
+  const key = String(reportId)
+  const current = reviewDrafts.value[key] || { verdict: 'suspicious', review_note: '', reviewer: 'admin' }
+  reviewDrafts.value = {
+    ...reviewDrafts.value,
+    [key]: { ...current, ...patch },
+  }
+}
+
+function setDraftVerdict(reportId, verdict) {
+  updateDraft(reportId, { verdict })
+}
+
+function setDraftNote(reportId, reviewNote) {
+  updateDraft(reportId, { review_note: reviewNote })
+}
+
+function feedbackFor(reportId) {
+  return reviewFeedbacks.value[String(reportId)] || null
+}
+
+function setReviewFeedback(reportId, feedback) {
+  const key = String(reportId)
+  reviewFeedbacks.value = {
+    ...reviewFeedbacks.value,
+    [key]: feedback,
+  }
+}
+
+function reviewMetaText(item) {
+  return [item.reviewer || 'admin', item.reviewed_at || item.updated_at || item.created_at].filter(Boolean).join(' · ')
+}
+
+async function refreshDashboardSilently() {
+  summary.value = await getDashboardSummary(adminToken.value)
+}
+
+async function submitReview(item, status) {
+  if (!adminToken.value) {
+    notify('\u8bf7\u5148\u8f93\u5165\u7ba1\u7406\u5458\u4ee4\u724c', 'error')
+    return
+  }
+
+  const draft = draftFor(item)
+  const option = reviewOption(draft.verdict)
+  const reportId = String(item.report_id)
+  reviewingReportId.value = item.report_id
+
+  try {
+    const reviewed = await reviewReport(adminToken.value, item.report_id, {
+      status,
+      reviewer: draft.reviewer || 'admin',
+      review_note: draft.review_note,
+      verdict: option.value,
+      risk_level: option.riskLevel,
+      score: option.score,
+    })
+    updateDraft(reportId, {
+      verdict: reviewed.verdict || option.value,
+      review_note: reviewed.review_note || draft.review_note,
+      reviewer: reviewed.reviewer || draft.reviewer || 'admin',
+    })
+    setReviewFeedback(reportId, {
+      tone: 'success',
+      text: status === 'closed'
+        ? '\u5df2\u5173\u95ed\u5f52\u6863\uff0c\u590d\u6838\u5907\u6ce8\u5df2\u4fdd\u5b58'
+        : '\u590d\u6838\u901a\u8fc7\uff0c\u590d\u6838\u5907\u6ce8\u5df2\u4fdd\u5b58',
+    })
+    await refreshDashboardSilently()
+    notify(status === 'closed' ? '\u4e3e\u62a5\u5df2\u5173\u95ed\u5f52\u6863' : '\u590d\u6838\u7ed3\u679c\u5df2\u63d0\u4ea4')
+  } catch (error) {
+    if (error.status === 401) {
+      admin.clearAdminAccess()
+    }
+    setReviewFeedback(reportId, {
+      tone: 'error',
+      text: error.message || '\u590d\u6838\u63d0\u4ea4\u5931\u8d25',
+    })
+    notify(error.message || '\u590d\u6838\u63d0\u4ea4\u5931\u8d25', 'error')
+  } finally {
+    reviewingReportId.value = ''
+  }
 }
 
 async function loadDashboard() {

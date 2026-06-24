@@ -21,6 +21,13 @@ def test_ui_root_page() -> None:
     assert '<div id="app"></div>' in response.text or "反诈护盾实验室" in response.text
 
 
+def test_overview_spa_route_serves_frontend() -> None:
+    response = client.get("/overview")
+    assert response.status_code == 200
+    assert "text/html" in response.headers.get("content-type", "")
+    assert '<div id="app"></div>' in response.text or "反诈护盾实验室" in response.text
+
+
 def test_ui_static_asset() -> None:
     response = client.get("/static/styles.css")
     assert response.status_code == 200
@@ -547,6 +554,158 @@ def test_json_config_drives_scoring() -> None:
         assert result["score"] >= 99
     finally:
         Path(tmp_path).unlink(missing_ok=True)
+
+
+def test_verification_code_mentions_do_not_false_positive() -> None:
+    """单独提到验证码或安全劝阻不应进入中风险。"""
+    from app.services.risk_engine import RiskEngine
+
+    engine = RiskEngine()
+    safe_messages = [
+        "我收到了验证码",
+        "银行发了验证码给我",
+        "验证码是多少",
+        "验证码不能告诉别人",
+        "不要把验证码发给任何人",
+    ]
+
+    for message in safe_messages:
+        result = engine.evaluate_text(message, [], "general", None)
+        assert result["level"] == "low", message
+        assert result["score"] < 20, message
+
+
+def test_verification_code_request_combinations_escalate() -> None:
+    """验证码只有与索要/提供语义组合后才升级风险。"""
+    from app.services.risk_engine import RiskEngine
+
+    engine = RiskEngine()
+
+    medium = engine.evaluate_text("客服让我把验证码告诉他", [], "general", None)
+    high = engine.evaluate_text("银行客服说账户异常，让我提供验证码解冻", [], "general", None)
+    authority = engine.evaluate_text("公检法让我转账并提供验证码", [], "general", None)
+
+    assert medium["level"] in {"medium", "high", "critical"}
+    assert high["level"] in {"high", "critical"}
+    assert authority["level"] in {"high", "critical"}
+    assert "account_takeover" in {item["rule"] for item in high["matched_rules"]}
+
+
+def test_refund_mentions_do_not_false_positive() -> None:
+    """正常退款咨询不应被冒充客服退款规则误伤。"""
+    from app.services.risk_engine import RiskEngine
+
+    engine = RiskEngine()
+    safe_messages = [
+        "我想申请退款",
+        "这个商品可以退款吗",
+        "商家同意退款了",
+    ]
+
+    for message in safe_messages:
+        result = engine.evaluate_text(message, [], "general", None)
+        assert result["level"] == "low", message
+        assert result["score"] < 20, message
+        assert "fake_refund_or_compensation" not in {
+            item["rule"] for item in result["matched_rules"]
+        }
+
+
+def test_refund_fraud_combinations_escalate() -> None:
+    """退款/理赔与先交钱、链接、银行卡、验证码等组合后升级风险。"""
+    from app.services.risk_engine import RiskEngine
+
+    engine = RiskEngine()
+
+    deposit = engine.evaluate_text("退款前需要先交保证金", [], "general", None)
+    airline = engine.evaluate_text(
+        "航班延误理赔，让我点链接填写银行卡和验证码",
+        [],
+        "general",
+        None,
+    )
+
+    assert deposit["level"] in {"medium", "high", "critical"}
+    assert airline["level"] in {"high", "critical"}
+    assert "fake_refund_or_compensation" in {
+        item["rule"] for item in airline["matched_rules"]
+    }
+
+
+def test_high_frequency_scam_combinations_are_covered() -> None:
+    """覆盖刷单返利、投资诱导、虚拟币、注销校园贷、中奖诈骗组合场景。"""
+    from app.services.risk_engine import RiskEngine
+
+    engine = RiskEngine()
+    cases = [
+        ("做任务刷单先垫付，完成后返佣金", "task_rebate_payment_escalation"),
+        ("导师带单稳赚不赔，让我充值 USDT", "investment_recharge_escalation"),
+        ("导师带单稳赚不赔，让我充值 USDT", "virtual_currency_transfer_escalation"),
+        ("注销校园贷账户，否则影响征信，让我共享屏幕", "loan_account_cancellation_scam"),
+        ("恭喜中奖，领奖需要先交手续费", "lottery_prize_fee_escalation"),
+    ]
+
+    for message, expected_rule in cases:
+        result = engine.evaluate_text(message, [], "general", None)
+        assert result["level"] in {"high", "critical"}, message
+        assert expected_rule in {item["rule"] for item in result["matched_rules"]}, message
+
+
+def test_default_text_rule_ids_match_json_config() -> None:
+    """内置默认文本规则 id 集合应与 JSON 配置保持一致。"""
+    import json
+    from pathlib import Path
+
+    from app.services.risk_engine import _DEFAULT_TEXT_RULES
+
+    cfg = json.loads(Path("app/data/risk_rules.json").read_text(encoding="utf-8"))
+    json_ids = {rule["name"] for rule in cfg["text_rules"]}
+    default_ids = {rule["name"] for rule in _DEFAULT_TEXT_RULES}
+
+    assert default_ids == json_ids
+
+
+def test_fallback_logs_explicit_mode_for_broken_json(tmp_path, caplog) -> None:
+    """JSON 损坏时应明确记录 fallback 模式。"""
+    from app.services.risk_engine import RiskEngine
+
+    broken = tmp_path / "broken.json"
+    broken.write_text("{not-valid-json", encoding="utf-8")
+
+    caplog.set_level("WARNING")
+    engine = RiskEngine(risk_rules_path=broken)
+
+    assert len(engine.rules) >= 10
+    assert "FALLBACK MODE" in caplog.text
+
+
+def test_validate_configs_warns_when_default_rule_ids_drift(caplog) -> None:
+    """validate_configs 能发现 JSON 与默认规则 id 集合不一致。"""
+    import copy
+
+    from app.services.risk_engine import RiskEngine
+
+    risk_cfg, url_cfg = RiskEngine().export_configs()
+    drifted = copy.deepcopy(risk_cfg)
+    drifted["text_rules"] = [
+        rule for rule in drifted["text_rules"] if rule["name"] != "account_takeover"
+    ]
+
+    caplog.set_level("WARNING")
+    RiskEngine.validate_configs(drifted, url_cfg)
+
+    assert "Default text rule ids differ" in caplog.text
+    assert "account_takeover" in caplog.text
+
+
+def test_url_risk_uses_independent_thresholds() -> None:
+    """URL 风险使用独立阈值，12 分即可进入 medium。"""
+    from app.services.risk_engine import RiskEngine
+
+    result = RiskEngine().evaluate_url("https://example.top/page")
+
+    assert result["score"] == 12
+    assert result["level"] == "medium"
 
 
 # ════════════════════════════════════
@@ -1701,12 +1860,12 @@ def test_p0_rule_matches_expose_version_and_rationale() -> None:
     })
     assert response.status_code == 200
     data = response.json()
-    assert data["ruleset_versions"]["text"] == "2.2.0"
-    assert data["ruleset_versions"]["url"] == "2.3.0"
+    assert data["ruleset_versions"]["text"] == "2.4.0"
+    assert data["ruleset_versions"]["url"] == "2.4.0"
     configured_rules = [item for item in data["matched_rules"] if item["rule"] == "scholarship_fraud"]
     assert configured_rules
     assert configured_rules[0]["rule_version"]
-    assert configured_rules[0]["ruleset_version"] == "2.2.0"
+    assert configured_rules[0]["ruleset_version"] == "2.4.0"
     assert configured_rules[0]["rationale"]
 
 
@@ -1739,6 +1898,28 @@ def test_online_sources_rules_cover_new_official_scenarios() -> None:
     assert hrss["level"] in {"high", "critical"}
     assert bank["level"] in {"medium", "high", "critical"}
     assert exam["level"] in {"high", "critical"}
+
+
+def test_chat_infers_emotion_signal_from_message_rules() -> None:
+    anxious = client.post("/chat", json={
+        "user_id": 9812,
+        "message": "对方一直催我马上转账，我很害怕，现在该怎么办",
+        "user_profile": {"role": "student"},
+    })
+    assert anxious.status_code == 200
+    anxious_data = anxious.json()
+    assert anxious_data["emotion"] == "anxious"
+    assert anxious_data["risk_breakdown"]["emotion_score"] > 0
+
+    neutral = client.post("/chat", json={
+        "user_id": 9813,
+        "message": "我想了解一下常见反诈知识",
+        "user_profile": {"role": "student"},
+    })
+    assert neutral.status_code == 200
+    neutral_data = neutral.json()
+    assert neutral_data["emotion"] == "neutral"
+    assert neutral_data["risk_breakdown"]["emotion_score"] == 0
 
 
 def test_online_source_url_brand_updates() -> None:

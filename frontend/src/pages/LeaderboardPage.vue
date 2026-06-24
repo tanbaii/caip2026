@@ -28,7 +28,7 @@
       </BaseCard>
     </div>
 
-    <div class="grid gap-4">
+    <div class="grid max-h-[42rem] gap-4 overflow-y-auto pr-1">
       <BaseCard v-for="item in remainingItems" :key="`${item.rank}-${item.user_id}`" padding-class="p-5" class="interactive-card flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
         <div class="flex min-w-0 items-center gap-4">
           <div class="flex h-14 w-14 shrink-0 items-center justify-center rounded-3xl text-xl font-black" :class="rankClass(item.rank)">#{{ item.rank }}</div>
@@ -37,7 +37,7 @@
             <p class="mt-1 truncate text-sm font-semibold text-slate-500">{{ item.username || '-' }} · {{ item.role || 'general' }}</p>
           </div>
         </div>
-        <div class="flex flex-wrap items-center gap-3">
+        <div class="flex max-h-32 flex-wrap items-center gap-3 overflow-y-auto">
           <StatusBadge tone="info">Lv.{{ item.level ?? 1 }}</StatusBadge>
           <StatusBadge tone="success">{{ item.points ?? 0 }} 分</StatusBadge>
           <StatusBadge v-for="badge in list(item.badges)" :key="badge" tone="muted">{{ badge }}</StatusBadge>

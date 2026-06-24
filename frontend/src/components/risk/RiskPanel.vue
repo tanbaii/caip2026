@@ -2,7 +2,7 @@
   <aside class="w-full min-w-0 xl:w-[360px]">
     <BaseCard
       padding-class="p-0"
-      class="flex min-h-0 flex-col overflow-hidden xl:sticky xl:top-5 xl:max-h-[calc(100vh-2.5rem)]"
+      class="flex max-h-[min(42rem,calc(100vh-2rem))] min-h-0 flex-col overflow-hidden xl:sticky xl:top-5 xl:max-h-[calc(100vh-2.5rem)]"
       :class="hasRisk && isHighRisk ? 'ring-2 ring-red-100 shadow-red-100/80' : ''"
     >
       <div class="flex shrink-0 items-center justify-between gap-4 border-b border-slate-100 bg-white/95 px-5 py-5 backdrop-blur">
@@ -28,6 +28,15 @@
           <section v-if="isHighRisk" class="rounded-3xl border border-red-100 bg-red-50 p-4 text-red-700 shadow-sm shadow-red-100/80">
             <p class="text-sm font-black">高风险拦截提示</p>
             <p class="mt-2 text-sm font-semibold leading-6">立即停止转账，不要共享屏幕或验证码，并通过官方渠道核验对方身份。</p>
+            <button
+              v-if="risk.reportPrefill"
+              type="button"
+              class="mt-4 inline-flex items-center gap-2 rounded-2xl bg-red-600 px-4 py-2 text-sm font-black text-white shadow-sm shadow-red-200 transition hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-400 focus:ring-offset-2"
+              @click="$emit('request-report', risk.reportPrefill)"
+            >
+              <Flag class="h-4 w-4" />
+              一键举报
+            </button>
           </section>
 
           <section class="risk-section">
@@ -40,13 +49,15 @@
               <span class="text-xs font-black text-slate-500">会话状态</span>
               <span class="rounded-full px-2 py-0.5 text-xs font-bold" :class="stageBadgeClass">{{ stageLabel }}</span>
             </div>
-            <p class="text-xs font-semibold leading-5 text-slate-500">{{ risk.conversationSummary }}</p>
-            <div v-if="Object.keys(risk.knownFacts).length" class="flex flex-wrap gap-1.5">
+            <p class="max-h-24 overflow-y-auto break-words text-xs font-semibold leading-5 text-slate-500">{{ risk.conversationSummary }}</p>
+            <div v-if="Object.keys(risk.knownFacts).length" class="max-h-24 overflow-y-auto">
+              <div class="flex flex-wrap gap-1.5">
               <span v-for="(val, key) in risk.knownFacts" :key="key" class="rounded-full bg-white px-2 py-0.5 text-xs font-bold text-slate-600 ring-1 ring-slate-200">{{ factLabel(key) }}</span>
+              </div>
             </div>
-            <div v-if="risk.pendingQuestions.length" class="space-y-1">
+            <div v-if="risk.pendingQuestions.length" class="max-h-28 space-y-1 overflow-y-auto">
               <p class="text-xs font-black text-amber-700">待确认</p>
-              <p v-for="(q, i) in risk.pendingQuestions" :key="i" class="text-xs font-semibold leading-5 text-amber-600">{{ q }}</p>
+              <p v-for="(q, i) in risk.pendingQuestions" :key="i" class="break-words text-xs font-semibold leading-5 text-amber-600">{{ q }}</p>
             </div>
           </section>
 
@@ -93,7 +104,7 @@
 
 <script setup>
 import { computed } from 'vue'
-import { Radar, ShieldAlert } from 'lucide-vue-next'
+import { Flag, Radar, ShieldAlert } from 'lucide-vue-next'
 import { useRiskPanel } from '../../composables/useRiskPanel.js'
 import BaseCard from '../common/BaseCard.vue'
 import StatusBadge from '../common/StatusBadge.vue'
@@ -110,6 +121,8 @@ const props = defineProps({
     default: null,
   },
 })
+
+defineEmits(['request-report'])
 
 const { hasRisk, risk } = useRiskPanel({
   get value() {

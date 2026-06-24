@@ -16,6 +16,7 @@ os.environ["RAG_LLM_ENABLED"] = "0"
 os.environ["RAG_RETRIEVAL_ENABLED"] = "0"
 os.environ["CHAT_FLOW_ENGINE"] = "classic"
 os.environ["REQUIRE_AUTH"] = "0"
+os.environ.setdefault("ANTI_FRAUD_ADMIN_TOKEN", "test-admin-token")
 
 import pytest  # noqa: E402
 
@@ -34,7 +35,7 @@ def _reset_db():
     """Re-initialise an empty database before every test so tests are isolated."""
     from app.main import storage
 
-    for table in ("users", "user_state", "reports", "scenario_progress", "chat_messages"):
+    for table in ("users", "user_state", "reports", "scenario_progress", "chat_messages", "chat_conversations"):
         with storage._connect() as conn:
             conn.execute(f"DELETE FROM {table}")
             conn.commit()

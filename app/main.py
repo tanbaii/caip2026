@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import time
+import logging
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -13,6 +14,9 @@ from fastapi.staticfiles import StaticFiles
 from app.models.schemas import (
     AIChatRequest,
     AIChatResponse,
+    ChatConversationCreateResponse,
+    ChatConversationListResponse,
+    ChatConversationMessagesResponse,
     ChatHistoryResponse,
     ChatRequest,
     ChatResetRequest,
@@ -21,6 +25,9 @@ from app.models.schemas import (
     LoginRequest,
     LoginResponse,
     RegisterRequest,
+    AdminReportsResponse,
+    ReportDetailResponse,
+    ReportReviewRequest,
     ReportRequest,
     ReportResponse,
     ReportHistoryResponse,
@@ -60,10 +67,17 @@ PROJECT_ROOT = BASE_DIR.parent
 load_dotenv(PROJECT_ROOT / ".env")
 FRONTEND_DIST_DIR = PROJECT_ROOT / "frontend" / "dist"
 FRONTEND_ASSETS_DIR = FRONTEND_DIST_DIR / "assets"
+FRONTEND_GODOT_DIST_DIR = FRONTEND_DIST_DIR / "godot_game"
+FRONTEND_GODOT_PUBLIC_DIR = PROJECT_ROOT / "frontend" / "public" / "godot_game"
 LEGACY_WEB_DIR = BASE_DIR / "web"
-SPA_ROUTES = {"login", "chat", "report", "game", "knowledge", "leaderboard", "profile", "admin"}
+SPA_ROUTES = {"login", "overview", "chat", "report", "game", "knowledge", "leaderboard", "profile", "admin"}
 API_PREFIXES = {"health", "auth", "chat", "ai", "report", "reports", "scenarios", "users", "leaderboard", "knowledge", "admin"}
-ADMIN_TOKEN = os.getenv("ANTI_FRAUD_ADMIN_TOKEN", "change-me")
+logger = logging.getLogger(__name__)
+ADMIN_TOKEN = os.getenv("ANTI_FRAUD_ADMIN_TOKEN")
+if ADMIN_TOKEN is not None:
+    ADMIN_TOKEN = ADMIN_TOKEN.strip() or None
+if ADMIN_TOKEN is None:
+    logger.warning("ANTI_FRAUD_ADMIN_TOKEN is not configured; admin endpoints are disabled.")
 JWT_SECRET = os.getenv("JWT_SECRET", "anti-fraud-lab-secret-key-change-in-production-2024")
 
 # ── CORS ──
@@ -112,7 +126,11 @@ knowledge_retriever = (
     if RAG_RETRIEVAL_ENABLED
     else None
 )
-hybrid_retriever = HybridRetriever(dense_retriever=knowledge_retriever)
+_bm25_index_path = os.getenv("RAG_BM25_INDEX_PATH") or str(BASE_DIR / "data" / "knowledge_base" / "bm25_index.pkl")
+hybrid_retriever = HybridRetriever(
+    dense_retriever=knowledge_retriever,
+    bm25_index_path=_bm25_index_path,
+)
 rag_reply_generator = (
     RagReplyGenerator()
     if (
@@ -144,6 +162,10 @@ app = FastAPI(
 
 if FRONTEND_ASSETS_DIR.exists():
     app.mount("/assets", StaticFiles(directory=FRONTEND_ASSETS_DIR), name="frontend-assets")
+
+_godot_static_dir = FRONTEND_GODOT_PUBLIC_DIR if FRONTEND_GODOT_PUBLIC_DIR.exists() else FRONTEND_GODOT_DIST_DIR
+if _godot_static_dir.exists():
+    app.mount("/godot_game", StaticFiles(directory=_godot_static_dir, html=True), name="godot-game")
 
 app.mount("/static", StaticFiles(directory=LEGACY_WEB_DIR), name="static")
 
@@ -199,6 +221,7 @@ def home() -> FileResponse:
 
 
 @app.get("/login", include_in_schema=False)
+@app.get("/overview", include_in_schema=False)
 @app.get("/chat", include_in_schema=False)
 @app.get("/report", include_in_schema=False)
 @app.get("/game", include_in_schema=False)
@@ -223,7 +246,8 @@ def rag_health() -> dict[str, object]:
     health["hybrid"] = {
         "configured": hybrid_retriever is not None,
         "bm25_index": hybrid_retriever is not None and hybrid_retriever.bm25_index is not None,
-        "bm25_docs": len(hybrid_retriever.bm25_index.corpus) if hybrid_retriever is not None and hybrid_retriever.bm25_index is not None else 0,
+        "bm25_docs": hybrid_retriever.bm25_docs if hybrid_retriever is not None else 0,
+        "bm25_index_path": _bm25_index_path,
         "reranker_enabled": os.getenv("RAG_RERANK_ENABLED", "0").lower() in {"1", "true", "yes"},
     }
     return health
@@ -250,8 +274,39 @@ def _resolve_user(
 
 
 def _require_admin(x_admin_token: str | None) -> None:
+    # TODO: Replace this shared token check with real role-based admin authorization.
+    if ADMIN_TOKEN is None:
+        logger.error("Admin access denied because ANTI_FRAUD_ADMIN_TOKEN is not configured.")
+        raise HTTPException(status_code=503, detail="Admin token is not configured")
     if x_admin_token != ADMIN_TOKEN:
         raise HTTPException(status_code=401, detail="管理员令牌错误")
+
+
+def _require_authenticated_user(authorization: str | None) -> dict[str, object]:
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    user = auth_service.get_current_user(authorization.removeprefix("Bearer "))
+    if not user:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    return user
+
+
+_REPORT_RATE_LIMIT_WINDOW_SECONDS = 60
+_REPORT_RATE_LIMIT_MAX_REQUESTS = 5
+_report_rate_limits: dict[str, list[float]] = {}
+
+
+def _check_report_rate_limit(user_id: int, request: Request) -> None:
+    client_host = request.client.host if request.client else "unknown"
+    key = f"{int(user_id)}:{client_host}"
+    now = time.monotonic()
+    window_start = now - _REPORT_RATE_LIMIT_WINDOW_SECONDS
+    recent = [timestamp for timestamp in _report_rate_limits.get(key, []) if timestamp >= window_start]
+    if len(recent) >= _REPORT_RATE_LIMIT_MAX_REQUESTS:
+        _report_rate_limits[key] = recent
+        raise HTTPException(status_code=429, detail="举报提交过于频繁，请稍后再试")
+    recent.append(now)
+    _report_rate_limits[key] = recent
 
 
 @app.post("/chat", response_model=ChatResponse)
@@ -266,7 +321,19 @@ def chat(
                 "user_profile": request.user_profile.model_copy(update={"role": user["role"]}),
             }
         )
-    return ChatResponse.model_validate(dialogue_service.process_chat(request))
+    response = dialogue_service.process_chat(request)
+    if response.get("risk_level") in {"high", "critical"}:
+        response["report_prefill"] = {
+            "content": request.message,
+            "url": None,
+            "channel": request.channel,
+            "risk_level": response.get("risk_level"),
+            "risk_score": response.get("risk_score"),
+            "reasons": response.get("intervention_script") or response.get("recommendations") or [],
+            "matched_rules": response.get("matched_rules", []),
+            "score_breakdown": response.get("risk_breakdown", {}),
+        }
+    return ChatResponse.model_validate(response)
 
 
 @app.post("/chat/reset")
@@ -275,8 +342,78 @@ def reset_chat(
     authorization: str | None = Header(default=None),
 ) -> dict[str, str]:
     _resolve_user(request.user_id, authorization)
-    dialogue_service.reset_conversation(request.user_id)
+    dialogue_service.reset_conversation(request.user_id, request.conversation_id)
     return {"message": "对话状态已重置"}
+
+
+@app.post("/users/{user_id}/chat/conversations", response_model=ChatConversationCreateResponse)
+def create_user_chat_conversation(
+    user_id: int,
+    authorization: str | None = Header(default=None),
+) -> ChatConversationCreateResponse:
+    _resolve_user(user_id, authorization)
+    conversation = storage.create_chat_conversation(user_id=user_id)
+    dialogue_service.reset_conversation(user_id, str(conversation["conversation_id"]))
+    return ChatConversationCreateResponse.model_validate(conversation)
+
+
+@app.get("/users/{user_id}/chat/conversations", response_model=ChatConversationListResponse)
+def get_user_chat_conversations(
+    user_id: int,
+    limit: int = Query(default=50, ge=1, le=200),
+    authorization: str | None = Header(default=None),
+) -> ChatConversationListResponse:
+    _resolve_user(user_id, authorization)
+    items = storage.list_chat_conversations(user_id=user_id, limit=limit)
+    return ChatConversationListResponse.model_validate(
+        {
+            "user_id": user_id,
+            "total": len(items),
+            "items": items,
+        }
+    )
+
+
+@app.get(
+    "/users/{user_id}/chat/conversations/{conversation_id}/messages",
+    response_model=ChatConversationMessagesResponse,
+)
+def get_user_chat_conversation_messages(
+    user_id: int,
+    conversation_id: str,
+    authorization: str | None = Header(default=None),
+) -> ChatConversationMessagesResponse:
+    _resolve_user(user_id, authorization)
+    messages = storage.list_chat_conversation_messages(
+        user_id=user_id,
+        conversation_id=conversation_id,
+    )
+    if not messages and not storage.get_chat_conversation(user_id=user_id, conversation_id=conversation_id):
+        raise HTTPException(status_code=404, detail="对话不存在")
+    return ChatConversationMessagesResponse.model_validate(
+        {
+            "user_id": user_id,
+            "conversation_id": conversation_id,
+            "messages": messages,
+        }
+    )
+
+
+@app.delete("/users/{user_id}/chat/conversations/{conversation_id}")
+def delete_user_chat_conversation(
+    user_id: int,
+    conversation_id: str,
+    authorization: str | None = Header(default=None),
+) -> dict[str, str]:
+    _resolve_user(user_id, authorization)
+    deleted = storage.delete_chat_conversation(
+        user_id=user_id,
+        conversation_id=conversation_id,
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail="对话不存在")
+    dialogue_service.reset_conversation(user_id, conversation_id)
+    return {"message": "对话已删除"}
 
 
 @app.get("/users/{user_id}/chat/history", response_model=ChatHistoryResponse)
@@ -299,13 +436,21 @@ def get_user_chat_history(
 @app.post("/report", response_model=ReportResponse)
 def report(
     request: ReportRequest,
+    raw_request: Request,
     authorization: str | None = Header(default=None),
 ) -> ReportResponse:
-    _resolve_user(request.user_id, authorization)
+    user = _resolve_user(request.user_id, authorization)
+    _check_report_rate_limit(request.user_id, raw_request)
+    user_role = str(user["role"]) if user else request.user_role
     result = report_service.analyze(
         user_id=request.user_id,
         url=request.url,
         content=request.content,
+        channel=request.channel,
+        user_role=user_role,
+        emotion=request.emotion,
+        chat_risk_level=request.chat_risk_level,
+        chat_risk_score=request.chat_risk_score,
     )
     return ReportResponse.model_validate(result)
 
@@ -433,6 +578,74 @@ def get_user_reports(
     )
 
 
+@app.get("/reports/{report_id}", response_model=ReportDetailResponse)
+def get_report_detail(
+    report_id: str,
+    authorization: str | None = Header(default=None),
+    x_admin_token: str | None = Header(default=None),
+) -> ReportDetailResponse:
+    item = report_service.get_report(report_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="举报记录不存在")
+    if x_admin_token is not None:
+        _require_admin(x_admin_token)
+        return ReportDetailResponse.model_validate(item)
+    user = _require_authenticated_user(authorization)
+    if int(user["id"]) != int(item["user_id"]):
+        raise HTTPException(status_code=403, detail="Cannot access another user's report")
+    return ReportDetailResponse.model_validate(item)
+
+
+@app.get("/admin/reports", response_model=AdminReportsResponse)
+def get_admin_reports(
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
+    status: str | None = Query(default=None),
+    risk_level: str | None = Query(default=None),
+    verdict: str | None = Query(default=None),
+    channel: str | None = Query(default=None),
+    user_id: int | None = Query(default=None, ge=1),
+    keyword: str | None = Query(default=None, max_length=120),
+    start_time: datetime | None = Query(default=None),
+    end_time: datetime | None = Query(default=None),
+    x_admin_token: str | None = Header(default=None),
+) -> AdminReportsResponse:
+    _require_admin(x_admin_token)
+    normalized_start_time = _to_storage_datetime(start_time)
+    normalized_end_time = _to_storage_datetime(end_time)
+    if normalized_start_time and normalized_end_time and normalized_start_time > normalized_end_time:
+        raise HTTPException(status_code=400, detail="start_time 不能晚于 end_time")
+
+    allowed = {
+        "status": {"pending", "reviewed", "closed"},
+        "risk_level": {"low", "medium", "high", "critical"},
+        "verdict": {"safe", "suspicious", "high_risk"},
+        "channel": {"web", "miniapp", "mobile"},
+    }
+    for name, value in (
+        ("status", status),
+        ("risk_level", risk_level),
+        ("verdict", verdict),
+        ("channel", channel),
+    ):
+        if value and value not in allowed[name]:
+            raise HTTPException(status_code=400, detail=f"{name} 筛选值无效")
+
+    result = report_service.list_admin_reports(
+        page=page,
+        page_size=page_size,
+        status=status,
+        risk_level=risk_level,
+        verdict=verdict,
+        channel=channel,
+        user_id=user_id,
+        keyword=keyword,
+        start_time=normalized_start_time,
+        end_time=normalized_end_time,
+    )
+    return AdminReportsResponse.model_validate(result)
+
+
 @app.patch("/reports/{report_id}/status")
 def update_report_status(
     report_id: str,
@@ -443,6 +656,27 @@ def update_report_status(
     if not storage.update_report_status(report_id, update.status):
         raise HTTPException(status_code=404, detail="举报记录不存在")
     return {"report_id": report_id, "status": update.status}
+
+
+@app.patch("/admin/reports/{report_id}/review", response_model=ReportDetailResponse)
+def review_report(
+    report_id: str,
+    review: ReportReviewRequest,
+    x_admin_token: str | None = Header(default=None),
+) -> ReportDetailResponse:
+    _require_admin(x_admin_token)
+    item = report_service.review_report(
+        report_id=report_id,
+        status=review.status,
+        reviewer=review.reviewer,
+        review_note=review.review_note,
+        verdict=review.verdict,
+        risk_level=review.risk_level,
+        score=review.score,
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="举报记录不存在")
+    return ReportDetailResponse.model_validate(item)
 
 
 # ── 规则管理与热加载 ──

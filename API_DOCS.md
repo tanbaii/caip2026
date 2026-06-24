@@ -15,6 +15,8 @@
 | 2 | POST | `/chat` | `chat()` | Vue chat API | Bearer Token |
 | 3 | POST | `/chat/reset` | `reset_chat()` | Vue chat API | Bearer Token |
 | 4 | POST | `/report` | `report()` | Vue report API | Bearer Token |
+| 5 | GET | `/reports/{report_id}` | `get_report_detail()` | Vue report detail | Bearer Token / x-admin-token |
+| 6 | GET | `/admin/reports` | `get_admin_reports()` | 管理端举报列表 | x-admin-token |
 | 4 | GET | `/knowledge/scams` | `list_scams()` :112 | app.js:630 | 无 |
 | 5 | GET | `/knowledge/laws` | `list_laws()` :117 | app.js:631 | 无 |
 | 6 | POST | `/knowledge/scams` | `add_scam()` :122 | 无 (管理员) | x-admin-token |
@@ -37,7 +39,7 @@
 | 22 | POST | `/admin/rules/rollback/{version_id}` | `rollback_rules()` | 规则管理页 | x-admin-token |
 | 23 | GET | `/admin/dashboard/summary` | `admin_dashboard_summary()` | 后台看板 | x-admin-token |
 
-共 22 个端点。
+共 25 个端点。
 
 ---
 
@@ -184,6 +186,7 @@
 | matched_rules | list[object] | 命中规则，含证据、权重、规则版本、规则集版本与判定依据 |
 | risk_breakdown | object | 文本、URL、知识库、画像、情绪、多轮对话等分数拆解 |
 | ruleset_versions | object | 实际加载的文本规则集与 URL 规则集版本 |
+| report_prefill | object / null | 当 `risk_level` 为 `high` 或 `critical` 时返回，用于前端“一键举报”预填；不会自动创建举报，必须用户确认提交 |
 
 ---
 
@@ -254,8 +257,12 @@
 | 字段 | 类型 | 说明 |
 |------|------|------|
 | report_id | str | 举报 ID |
+| duplicated | bool | 是否命中同一用户 24 小时重复举报去重 |
+| channel | "web"/"miniapp"/"mobile" | 提交渠道，写入 SQLite 并在列表/详情/管理端返回 |
+| risk_level | "low"/"medium"/"high"/"critical" | 与 `/chat` 一致的风险等级 |
 | verdict | "safe"/"suspicious"/"high_risk" | 判定结果 |
 | risk_score | int | 风险分 |
+| score_breakdown | object | 文本、URL、封顶前后分数和总分 |
 | reasons | list[str] | 判定理由 |
 | recommendations | list[str] | 建议 |
 | matched_keywords | list[str] | 命中关键词 |
@@ -264,10 +271,17 @@
 | risk_breakdown | object | URL 分、文本分和总分 |
 | ruleset_versions | object | 实际加载的文本规则集与 URL 规则集版本 |
 
-判定阈值:
-- `score >= 55` → `high_risk`
-- `score >= 25` → `suspicious`
-- 其余 → `safe`
+评分与等级:
+- 文本分析复用 `risk_rules.json` / `RiskEngine.evaluate_text()`，URL 分析复用 `RiskEngine.evaluate_url()`；不再维护独立举报关键词表。
+- `content_score_raw` 为文本规则原始分，`content_score_capped` 上限为 70；如果命中“科普/防范意图且无明确行动诱导”，文本有效分上限为 19；总分上限为 100。
+- 风险等级复用聊天阈值：`critical >= 70`、`high >= 40`、`medium >= 20`、其余 `low`。
+- 为兼容旧字段，`verdict` 映射为：`low -> safe`，`medium -> suspicious`，`high|critical -> high_risk`。
+- 同一用户 24 小时内重复提交时：有 URL 按 `user_id + normalized_url` 去重；无 URL 才按 `user_id + content_hash` 去重；不同用户互不去重。
+- 高频提交 `/report` 返回 `429`；管理员查询接口不受此限流影响。
+
+### GET /reports/{report_id} — 举报详情
+
+返回完整分析详情：`content`、`url`、`channel`、`risk_level`、`verdict`、`score`、`score_breakdown`、`matched_rules`、`url_flags`、`reasons`、`status`、`created_at`、`updated_at`、`content_hash`、`normalized_url`。
 
 ---
 
@@ -430,8 +444,13 @@ GET /users/1/reports?limit=10&start_at=2026-04-01T00:00:00&end_at=2026-05-01T00:
 | report_id | str | 举报 ID |
 | user_id | int | 用户 ID |
 | score | int | 风险分 |
+| risk_level | "low"/"medium"/"high"/"critical" | 风险等级 |
 | verdict | "safe"/"suspicious"/"high_risk" | 判定 |
+| channel | "web"/"miniapp"/"mobile" | 提交渠道 |
 | matched_keywords | list[str] | 命中关键词 |
+| url_host | str / null | URL host 摘要 |
+| content_summary | str / null | 脱敏内容摘要 |
+| status | "pending"/"reviewed"/"closed" | 管理员复核状态 |
 | created_at | str | 创建时间 |
 
 错误: 400 start_at 晚于 end_at
@@ -496,7 +515,7 @@ GET /users/1/reports?limit=10&start_at=2026-04-01T00:00:00&end_at=2026-05-01T00:
 
 > main.py:122 → `knowledge_base.add_scam()`
 
-**请求头**: `x-admin-token: <管理员令牌>` (默认 "change-me", 生产环境通过 `ANTI_FRAUD_ADMIN_TOKEN` 环境变量配置)
+**请求头**: `x-admin-token: <管理员令牌>`。令牌通过 `ANTI_FRAUD_ADMIN_TOKEN` 环境变量配置；未配置时管理接口 fail-closed，返回 `503`，不会接受默认 `change-me`。
 
 **请求体** `ScamEntryCreate` (schemas.py:75)
 
@@ -537,6 +556,27 @@ GET /users/1/reports?limit=10&start_at=2026-04-01T00:00:00&end_at=2026-05-01T00:
 | rules | 当前规则版本、启停数量、最近规则变更记录 |
 
 举报队列只返回已脱敏的 `content_summary` 和 `url_host`，不返回原始举报文本。
+
+### GET /admin/reports — 管理员全局举报列表
+
+请求头：`X-Admin-Token`。当前项目仍是共享管理令牌校验，尚未实现真正的管理员角色鉴权。
+
+Query 参数：
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| page | int | 1 | 页码 |
+| page_size | int | 20 | 每页数量，1-100 |
+| status | str / null | null | `pending` / `reviewed` / `closed` |
+| risk_level | str / null | null | `low` / `medium` / `high` / `critical` |
+| verdict | str / null | null | `safe` / `suspicious` / `high_risk` |
+| channel | str / null | null | `web` / `miniapp` / `mobile` |
+| user_id | int / null | null | 指定用户 |
+| keyword | str / null | null | 搜索 content、summary、url、关键词和原因；`%`、`_`、`\` 按普通字符转义 |
+| start_time | datetime / null | null | 创建时间起点 |
+| end_time | datetime / null | null | 创建时间终点 |
+
+响应：`{ total, page, page_size, items }`，`items` 为完整举报详情摘要，按 `created_at DESC, report_id DESC` 排序。管理员可继续使用 `PATCH /reports/{report_id}/status` 将状态改为 `pending`、`reviewed` 或 `closed`。
 
 ### GET /admin/rules/overview — 当前规则
 
@@ -634,6 +674,17 @@ GET /users/1/reports?limit=10&start_at=2026-04-01T00:00:00&end_at=2026-05-01T00:
 | 风险守门人 | 积分 >= 150 |
 | 情景闯关达人 | 完成关卡 >= 3 |
 | 冷静止损王 | 高风险阻断 >= 2 |
+
+---
+
+## 本轮举报中心安全修正
+
+- `GET /reports/{report_id}` 不再公开裸读。未登录返回 `401`；普通用户只能读取自己的举报，跨用户读取返回 `403`；管理员可通过 `X-Admin-Token` 读取所有举报。当前仍是共享管理员令牌机制，TODO：替换为真正的管理员角色鉴权。
+- 管理员接口改为 fail-closed：`ANTI_FRAUD_ADMIN_TOKEN` 未配置时返回 `503`，不会接受默认 `change-me`。
+- `/report` 支持 `user_role`、`emotion`、`chat_risk_level`、`chat_risk_score`、`chat_context`；内容中的 URL 会自动提取并交给 `RiskEngine.evaluate_url()` 分析。
+- 举报评分继续复用 `/chat` 的等级阈值：`critical >= 70`、`high >= 40`、`medium >= 20`、其余 `low`。文本分 `content_score_capped` 上限为 70；命中“科普/防范意图且无明确行动诱导”时，文本有效分上限为 19，避免关键词堆叠把科普文本打成 high。
+- 重复举报去重规则：有 URL 时按 `user_id + normalized_url`；无 URL 时才按 `user_id + content_hash`。不同用户互不去重，同一用户不同 URL 即使内容相同也不会误合并。
+- `GET /admin/reports?keyword=` 中的 `%`、`_`、`\` 会按普通字符转义后再做 LIKE 查询。
 
 ### 前后端一致性
 

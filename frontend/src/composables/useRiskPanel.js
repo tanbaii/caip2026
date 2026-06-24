@@ -69,6 +69,7 @@ export function useRiskPanel(riskRef) {
       badges: asList(data.badges),
       latencyMs: Number(data.latency_ms) || 0,
       rulesetVersions: data.ruleset_versions || {},
+      reportPrefill: data.report_prefill || null,
       meta,
     }
   })

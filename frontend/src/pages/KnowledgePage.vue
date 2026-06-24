@@ -31,7 +31,7 @@
         <StatusBadge tone="info">{{ filteredPlaybooks.length }} 条</StatusBadge>
       </div>
       <div v-if="!filteredPlaybooks.length" class="soft-card p-8 text-center text-sm font-bold text-slate-400">暂无匹配的处置手册。</div>
-      <div v-else class="grid gap-5 xl:grid-cols-2">
+      <div v-else class="grid max-h-[42rem] gap-5 overflow-y-auto pr-1 xl:grid-cols-2">
         <BaseCard v-for="item in filteredPlaybooks" :key="item.id || item.title" padding-class="p-6" class="interactive-card space-y-4">
           <div class="flex items-start justify-between gap-4">
             <div>
@@ -57,10 +57,10 @@
         <StatusBadge tone="muted">{{ filteredFaqs.length }} 条</StatusBadge>
       </div>
       <div v-if="!filteredFaqs.length" class="soft-card p-8 text-center text-sm font-bold text-slate-400">暂无匹配的 FAQ。</div>
-      <div v-else class="grid gap-4 md:grid-cols-2">
+      <div v-else class="grid max-h-[36rem] gap-4 overflow-y-auto pr-1 md:grid-cols-2">
         <BaseCard v-for="item in filteredFaqs" :key="item.id || item.question" padding-class="p-5" class="space-y-3">
           <h3 class="text-lg font-black text-slate-900">{{ item.question || '未命名问题' }}</h3>
-          <p class="text-sm font-semibold leading-7 text-slate-600">{{ item.answer || '暂无回答。' }}</p>
+          <p class="max-h-64 overflow-y-auto break-words text-sm font-semibold leading-7 text-slate-600">{{ item.answer || '暂无回答。' }}</p>
         </BaseCard>
       </div>
     </section>
@@ -72,7 +72,7 @@
       </div>
       <div v-if="loading" class="soft-card p-8 text-center text-sm font-bold text-slate-500">正在加载知识库...</div>
       <div v-else-if="!filteredScams.length" class="soft-card p-8 text-center text-sm font-bold text-slate-400">暂无匹配的骗局知识。</div>
-      <div v-else class="grid gap-5 xl:grid-cols-2">
+      <div v-else class="grid max-h-[48rem] gap-5 overflow-y-auto pr-1 xl:grid-cols-2">
         <BaseCard v-for="item in filteredScams" :key="item.id || item.name" padding-class="p-6" class="interactive-card space-y-5">
           <div class="flex items-start justify-between gap-4">
             <div>
@@ -87,7 +87,7 @@
           <InfoList title="风险信号" :items="list(item.red_flags)" />
           <div class="rounded-2xl bg-slate-50 p-4">
             <p class="text-xs font-black uppercase tracking-widest text-slate-400">典型案例</p>
-            <p class="mt-2 break-words text-sm font-semibold leading-7 text-slate-600">{{ item.typical_case || '暂无案例。' }}</p>
+            <p class="mt-2 max-h-48 overflow-y-auto break-words text-sm font-semibold leading-7 text-slate-600">{{ item.typical_case || '暂无案例。' }}</p>
           </div>
           <InfoList title="防护建议" :items="list(item.prevention)" />
           <TagList title="法律依据" :items="list(item.legal_refs)" tone="info" />
@@ -102,11 +102,11 @@
         <StatusBadge tone="muted">{{ filteredLaws.length }} 条</StatusBadge>
       </div>
       <div v-if="!filteredLaws.length" class="soft-card p-8 text-center text-sm font-bold text-slate-400">暂无匹配的法律知识。</div>
-      <div v-else class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <div v-else class="grid max-h-[42rem] gap-4 overflow-y-auto pr-1 md:grid-cols-2 xl:grid-cols-3">
         <BaseCard v-for="law in filteredLaws" :key="law.id || law.title || law.name" padding-class="p-5" class="space-y-3">
           <h3 class="text-lg font-black text-slate-900">{{ law.title || law.name || law.id || '法律条目' }}</h3>
-          <p v-if="law.content || law.summary || law.description || law.text" class="text-sm font-semibold leading-7 text-slate-600">{{ law.content || law.summary || law.description || law.text }}</p>
-          <ul v-else-if="list(law.highlights).length" class="space-y-2">
+          <p v-if="law.content || law.summary || law.description || law.text" class="max-h-64 overflow-y-auto break-words text-sm font-semibold leading-7 text-slate-600">{{ law.content || law.summary || law.description || law.text }}</p>
+          <ul v-else-if="list(law.highlights).length" class="max-h-64 space-y-2 overflow-y-auto pr-1">
             <li v-for="(item, index) in list(law.highlights)" :key="index" class="rounded-2xl bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-600">{{ item }}</li>
           </ul>
           <p v-else class="text-sm font-semibold leading-7 text-slate-400">暂无说明。</p>
@@ -136,7 +136,7 @@ const InfoList = {
   template: `
     <section class="space-y-2">
       <h4 class="text-sm font-black text-slate-900">{{ title }}</h4>
-      <ul v-if="items.length" class="space-y-2">
+      <ul v-if="items.length" class="max-h-64 space-y-2 overflow-y-auto pr-1">
         <li v-for="(item,index) in items" :key="index" class="break-words rounded-2xl border border-slate-100 bg-slate-50 p-3 text-sm font-semibold leading-6 text-slate-600">{{ item }}</li>
       </ul>
       <p v-else class="rounded-2xl bg-slate-50 p-3 text-sm font-semibold text-slate-400">暂无内容。</p>
@@ -149,8 +149,10 @@ const TagList = {
   template: `
     <section class="space-y-2">
       <h4 class="text-sm font-black text-slate-900">{{ title }}</h4>
-      <div v-if="items.length" class="flex flex-wrap gap-2">
-        <span v-for="item in items" :key="item" class="max-w-full break-words rounded-full px-3 py-1.5 text-xs font-black shadow-sm ring-1" :class="tone === 'danger' ? 'bg-red-50 text-red-700 shadow-red-100 ring-red-100' : 'bg-blue-50 text-blue-700 shadow-blue-100 ring-blue-100'">{{ item }}</span>
+      <div v-if="items.length" class="max-h-40 overflow-y-auto pr-1">
+        <div class="flex flex-wrap gap-2">
+          <span v-for="item in items" :key="item" class="max-w-full break-words rounded-full px-3 py-1.5 text-xs font-black shadow-sm ring-1" :class="tone === 'danger' ? 'bg-red-50 text-red-700 shadow-red-100 ring-red-100' : 'bg-blue-50 text-blue-700 shadow-blue-100 ring-blue-100'">{{ item }}</span>
+        </div>
       </div>
       <p v-else class="rounded-2xl bg-slate-50 p-3 text-sm font-semibold text-slate-400">暂无内容。</p>
     </section>
@@ -171,7 +173,7 @@ const SourceList = {
   template: `
     <section class="space-y-2">
       <h4 class="text-sm font-black text-slate-900">{{ title }}</h4>
-      <ul v-if="items.length" class="space-y-2">
+      <ul v-if="items.length" class="max-h-64 space-y-2 overflow-y-auto pr-1">
         <li v-for="(source,index) in items" :key="index" class="rounded-2xl border border-emerald-100 bg-emerald-50 p-3 text-sm font-semibold leading-6 text-emerald-800">
           <a v-if="safeUrl(source)" :href="safeUrl(source)" target="_blank" rel="noopener noreferrer" class="break-words font-black underline decoration-emerald-300 underline-offset-4">{{ label(source) }}</a>
           <span v-else class="break-words font-black">{{ label(source) }}</span>

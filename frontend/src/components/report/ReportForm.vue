@@ -33,7 +33,7 @@
 </template>
 
 <script setup>
-import { computed, reactive } from 'vue'
+import { computed, reactive, watch } from 'vue'
 import { Flag, Loader2 } from 'lucide-vue-next'
 import BaseButton from '../common/BaseButton.vue'
 import BaseCard from '../common/BaseCard.vue'
@@ -47,6 +47,10 @@ const props = defineProps({
     type: String,
     default: '',
   },
+  initialValues: {
+    type: Object,
+    default: () => ({}),
+  },
 })
 
 const emit = defineEmits(['submit'])
@@ -55,6 +59,15 @@ const form = reactive({
   url: '',
   content: '',
 })
+
+watch(
+  () => props.initialValues,
+  (value) => {
+    form.url = value?.url || ''
+    form.content = value?.content || ''
+  },
+  { immediate: true, deep: true },
+)
 
 const canSubmit = computed(() => Boolean(form.url || form.content))
 

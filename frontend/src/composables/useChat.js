@@ -1,5 +1,11 @@
 import { ref, watch } from 'vue'
-import { getRiskChatHistory, resetRiskChat, sendRiskChat } from '../api/chat.js'
+import {
+  createRiskChatConversation,
+  deleteRiskChatConversation,
+  getRiskChatConversationMessages,
+  getRiskChatConversations,
+  sendRiskChat,
+} from '../api/chat.js'
 
 const welcomeMessage = {
   id: 'welcome',
@@ -10,18 +16,21 @@ const welcomeMessage = {
 export function useChat(userRef) {
   const messages = ref([welcomeMessage])
   const latestRisk = ref(null)
+  const conversations = ref([])
+  const conversationTotal = ref(0)
+  const activeConversationId = ref(null)
+  const viewingConversation = ref(false)
   const loading = ref(false)
   const historyLoading = ref(false)
   const error = ref('')
-  let loadedUserId = null
 
   function buildPayload(message) {
     const user = userRef?.value || {}
     return {
       user_id: Number(user.user_id) || 0,
+      conversation_id: activeConversationId.value,
       message,
       channel: 'web',
-      emotion: 'anxious',
       user_profile: {
         role: user.role || 'general',
         risk_tolerance: 'low',
@@ -36,6 +45,10 @@ export function useChat(userRef) {
       return null
     }
 
+    if (!activeConversationId.value) {
+      await startNewConversation({ refreshHistory: false })
+    }
+
     const userMessage = {
       id: `user-${Date.now()}`,
       role: 'user',
@@ -43,11 +56,13 @@ export function useChat(userRef) {
     }
 
     messages.value = [...messages.value, userMessage]
+    viewingConversation.value = false
     loading.value = true
     error.value = ''
 
     try {
       const data = await sendRiskChat(buildPayload(content))
+      activeConversationId.value = data.conversation_id || activeConversationId.value
       latestRisk.value = data
       messages.value = [
         ...messages.value,
@@ -57,6 +72,7 @@ export function useChat(userRef) {
           content: data.reply || '已完成风险研判，请查看右侧分析面板。',
         },
       ]
+      await loadConversations()
       return data
     } catch (err) {
       error.value = err.message || '风险研判失败'
@@ -75,21 +91,28 @@ export function useChat(userRef) {
     }
   }
 
-  async function resetChat() {
+  async function startNewConversation(options = {}) {
+    const { refreshHistory = true } = options
     const userId = Number(userRef?.value?.user_id) || 0
-    let resetFailed = false
     if (userId) {
       try {
-        await resetRiskChat(userId)
+        const data = await createRiskChatConversation(userId)
+        activeConversationId.value = data.conversation_id
       } catch (err) {
-        error.value = err.message || '服务端对话状态重置失败'
-        resetFailed = true
+        error.value = err.message || '新对话初始化失败'
+        activeConversationId.value = null
       }
+    } else {
+      activeConversationId.value = null
     }
     messages.value = [welcomeMessage]
     latestRisk.value = null
-    if (!resetFailed) {
+    viewingConversation.value = false
+    if (activeConversationId.value || !userId) {
       error.value = ''
+    }
+    if (refreshHistory) {
+      await loadConversations()
     }
   }
 
@@ -108,30 +131,81 @@ export function useChat(userRef) {
     ]
   }
 
-  async function loadHistory() {
+  function riskFromHistoryItem(item) {
+    return {
+      risk_level: item.risk_level,
+      risk_score: item.risk_score,
+      intent: item.intent,
+      matched_scams: item.matched_scams || [],
+      session_stage: item.session_stage,
+    }
+  }
+
+  async function openConversation(item) {
     const userId = Number(userRef?.value?.user_id) || 0
-    if (!userId || historyLoading.value || loadedUserId === userId) {
+    const conversationId = item?.conversation_id
+    if (!userId || !conversationId) {
+      return
+    }
+    historyLoading.value = true
+    error.value = ''
+    try {
+      const data = await getRiskChatConversationMessages(userId, conversationId)
+      const historyMessages = (data.messages || []).flatMap(mapHistoryItem)
+      const latest = (data.messages || []).at(-1)
+      activeConversationId.value = conversationId
+      viewingConversation.value = true
+      messages.value = historyMessages.length ? [welcomeMessage, ...historyMessages] : [welcomeMessage]
+      latestRisk.value = latest ? riskFromHistoryItem(latest) : null
+    } catch (err) {
+      error.value = err.message || '对话加载失败'
+    } finally {
+      historyLoading.value = false
+    }
+  }
+
+  async function loadConversations() {
+    const userId = Number(userRef?.value?.user_id) || 0
+    if (!userId || historyLoading.value) {
       return
     }
     historyLoading.value = true
     try {
-      const data = await getRiskChatHistory(userId, 50)
-      const historyMessages = (data.items || []).flatMap(mapHistoryItem)
-      messages.value = historyMessages.length ? [welcomeMessage, ...historyMessages] : [welcomeMessage]
+      const data = await getRiskChatConversations(userId, 50)
       const items = data.items || []
-      const latest = items[items.length - 1]
-      if (latest) {
-        latestRisk.value = {
-          risk_level: latest.risk_level,
-          risk_score: latest.risk_score,
-          intent: latest.intent,
-          matched_scams: latest.matched_scams || [],
-          session_stage: latest.session_stage,
-        }
-      }
-      loadedUserId = userId
+      conversations.value = items
+      conversationTotal.value = Number(data.total) || items.length
     } catch (err) {
-      error.value = err.message || '瀵硅瘽鍘嗗彶鍔犺浇澶辫触'
+      error.value = err.message || '对话历史加载失败'
+    } finally {
+      historyLoading.value = false
+    }
+  }
+
+  async function deleteConversation(item) {
+    const userId = Number(userRef?.value?.user_id) || 0
+    const conversationId = item?.conversation_id
+    if (!userId || !conversationId) {
+      return
+    }
+
+    const title = item.title || item.preview || '这条历史对话'
+    const confirmed = typeof window === 'undefined'
+      ? true
+      : window.confirm(`确定删除「${title}」吗？删除后无法恢复。`)
+    if (!confirmed) {
+      return
+    }
+
+    error.value = ''
+    try {
+      await deleteRiskChatConversation(userId, conversationId)
+      if (activeConversationId.value === conversationId) {
+        await startNewConversation({ refreshHistory: false })
+      }
+      await loadConversations()
+    } catch (err) {
+      error.value = err.message || '删除对话失败'
     } finally {
       historyLoading.value = false
     }
@@ -139,9 +213,8 @@ export function useChat(userRef) {
 
   watch(
     () => userRef?.value?.user_id,
-    () => {
-      loadedUserId = null
-      loadHistory()
+    async () => {
+      await startNewConversation()
     },
     { immediate: true },
   )
@@ -149,11 +222,17 @@ export function useChat(userRef) {
   return {
     messages,
     latestRisk,
+    conversations,
+    conversationTotal,
+    activeConversationId,
+    viewingConversation,
     loading,
     historyLoading,
     error,
     sendMessage,
-    resetChat,
-    loadHistory,
+    startNewConversation,
+    openConversation,
+    deleteConversation,
+    loadConversations,
   }
 }

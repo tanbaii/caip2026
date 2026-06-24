@@ -18,8 +18,10 @@
 """
 from __future__ import annotations
 
+import argparse
 import json
 from pathlib import Path
+from typing import Any
 
 DATA_PATH = Path(__file__).resolve().parent.parent / "app" / "data" / "knowledge_center.json"
 
@@ -1098,13 +1100,80 @@ def build() -> dict:
     }
 
 
-def main() -> None:
-    data = build()
-    DATA_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with DATA_PATH.open("w", encoding="utf-8") as fp:
+def _stats(data: dict[str, Any]) -> dict[str, int]:
+    meta_stats = data.get("meta", {}).get("stats", {})
+    if isinstance(meta_stats, dict):
+        return {
+            "fraud_types": int(meta_stats.get("fraud_types") or len(data.get("frauds", []))),
+            "categories": int(meta_stats.get("categories") or len(data.get("categories", []))),
+            "laws": int(meta_stats.get("laws") or len(data.get("laws", []))),
+            "quiz": int(meta_stats.get("quiz") or len(data.get("quiz", []))),
+        }
+    return {
+        "fraud_types": len(data.get("frauds", [])),
+        "categories": len(data.get("categories", [])),
+        "laws": len(data.get("laws", [])),
+        "quiz": len(data.get("quiz", [])),
+    }
+
+
+def _load_json(path: Path) -> dict[str, Any] | None:
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _is_richer(existing: dict[str, Any], candidate: dict[str, Any]) -> bool:
+    existing_stats = _stats(existing)
+    candidate_stats = _stats(candidate)
+    return (
+        existing_stats["fraud_types"] > candidate_stats["fraud_types"]
+        or existing_stats["quiz"] > candidate_stats["quiz"]
+        or len(existing.get("frauds", [])) > len(candidate.get("frauds", []))
+    )
+
+
+def _select_output_data(path: Path, *, force_builtin: bool) -> tuple[dict[str, Any], bool]:
+    candidate = build()
+    existing = _load_json(path)
+    if existing is not None and not force_builtin and _is_richer(existing, candidate):
+        return existing, True
+    return candidate, False
+
+
+def main(argv: list[str] | None = None) -> None:
+    parser = argparse.ArgumentParser(description="Build app/data/knowledge_center.json")
+    parser.add_argument(
+        "--output",
+        "-o",
+        type=Path,
+        default=DATA_PATH,
+        help="Output JSON path. Defaults to app/data/knowledge_center.json.",
+    )
+    parser.add_argument(
+        "--force-built-in",
+        action="store_true",
+        help="Overwrite even when the existing file contains a richer migrated knowledge center.",
+    )
+    args = parser.parse_args(argv)
+
+    data, preserved_existing = _select_output_data(args.output, force_builtin=args.force_built_in)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    with args.output.open("w", encoding="utf-8") as fp:
         json.dump(data, fp, ensure_ascii=False, indent=2)
-    print(f"已生成知识中心数据 -> {DATA_PATH}")
-    print(f"  诈骗类型 {len(FRAUDS)} 种 | 分类 {len(CATEGORIES)} | 法规 {len(LAWS)} | 自测 {len(QUIZ)} 题 | 热线 {len(HOTLINES)}")
+    action = "保留现有增强版知识中心" if preserved_existing else "已生成知识中心数据"
+    stats = _stats(data)
+    print(f"{action} -> {args.output}")
+    print(
+        "  诈骗类型 {fraud_types} 种 | 分类 {categories} | 法规 {laws} | 自测 {quiz} 题 | 热线 {hotlines}".format(
+            **stats,
+            hotlines=len(data.get("hotlines", HOTLINES)),
+        )
+    )
 
 
 if __name__ == "__main__":

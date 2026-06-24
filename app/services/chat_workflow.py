@@ -13,6 +13,7 @@ from app.services.dialogue_service import (
     _max_level,
     _reward_event_key,
     _top_scam_type,
+    infer_emotion_signal,
 )
 from app.services.conversation_state import has_closure_action_taken, has_safety_action_taken
 from app.services.conversation_state import is_deescalation_context
@@ -29,6 +30,9 @@ except Exception:  # pragma: no cover - local tests run without optional depende
 class ChatWorkflowState(TypedDict, total=False):
     request: ChatRequest
     start_time: float
+    conversation_id: str
+    conversation_key: str
+    emotion: str
     history: list[dict[str, str]]
     intent: str
     matched_scams: list[dict[str, Any]]
@@ -64,9 +68,15 @@ class ChatWorkflowRunner:
         self._graph = self._compile_graph()
 
     def process_chat(self, request: ChatRequest) -> dict[str, Any]:
+        conversation_id = self.service._ensure_conversation_id(request)
+        request = request.model_copy(update={"conversation_id": conversation_id})
+        self.service._restore_persisted_conversation(request.user_id, conversation_id)
         initial_state: ChatWorkflowState = {
             "request": request,
             "start_time": time.perf_counter(),
+            "conversation_id": conversation_id,
+            "conversation_key": self.service._conversation_key(request.user_id, conversation_id),
+            "emotion": infer_emotion_signal(request.message, request.emotion),
         }
         if self._graph is not None:
             final_state = self._graph.invoke(initial_state)
@@ -74,8 +84,8 @@ class ChatWorkflowRunner:
             final_state = self._invoke_sequential(initial_state)
         return final_state["response"]
 
-    def reset_conversation(self, user_id: int) -> None:
-        self.service.reset_conversation(user_id)
+    def reset_conversation(self, user_id: int, conversation_id: str | None = None) -> None:
+        self.service.reset_conversation(user_id, conversation_id)
 
     def _compile_graph(self) -> Any | None:
         if StateGraph is None:
@@ -144,7 +154,8 @@ class ChatWorkflowRunner:
 
     def _recognize_context(self, state: ChatWorkflowState) -> dict[str, Any]:
         request = state["request"]
-        history = self.service._history.get(request.user_id, [])
+        conversation_key = state["conversation_key"]
+        history = self.service._history.get(conversation_key, [])
 
         intent, _, _ = self.service.intent_recognizer.detect_intent(request.message, history)
         matched_scams = self.service.knowledge_base.search_scams(request.message)
@@ -152,8 +163,8 @@ class ChatWorkflowRunner:
 
         if _is_new_explicit_scam_topic(history, current_scam_type):
             history = []
-            self.service._history[request.user_id] = []
-            self.service._conv_state.reset(request.user_id)
+            self.service._history[conversation_key] = []
+            self.service._conv_state.reset(conversation_key)
             intent, _, _ = self.service.intent_recognizer.detect_intent(request.message, history)
 
         return {
@@ -170,7 +181,7 @@ class ChatWorkflowRunner:
             request.message,
             state["matched_scams"],
             request.user_profile.role,
-            request.emotion,
+            state["emotion"],
         )
 
         url_bonus = 0
@@ -210,14 +221,14 @@ class ChatWorkflowRunner:
         risk = dict(state["risk"])
 
         conv_data = self.service._conv_state.update_and_get(
-            user_id=request.user_id,
+            user_id=state["conversation_key"],
             message=request.message,
             risk_level=risk_level,
             intent=state["intent"],
             matched_scams=state["matched_scams"],
         )
         conv_bonus, conv_rules, conv_reasons = self.service._conv_state.compute_conversation_bonus(
-            request.user_id
+            state["conversation_key"]
         )
 
         if conv_bonus > 0:
@@ -227,7 +238,7 @@ class ChatWorkflowRunner:
             breakdown["conversation_score"] = conv_bonus
             breakdown["total"] = total_score
             risk_level = self.service.risk_engine._score_to_level(total_score)
-            conv_data = self.service._conv_state.recompute_stage(request.user_id, risk_level)
+            conv_data = self.service._conv_state.recompute_stage(state["conversation_key"], risk_level)
 
         (
             total_score,
@@ -238,7 +249,7 @@ class ChatWorkflowRunner:
             all_matched_rules,
             conv_data,
         ) = self.service._apply_evidence_risk_adjustments(
-            request.user_id,
+            state["conversation_key"],
             total_score,
             risk_level,
             breakdown,
@@ -259,7 +270,7 @@ class ChatWorkflowRunner:
             breakdown["context_score_floor"] = previous_score
             breakdown["total"] = total_score
             risk_level = self.service.risk_engine._score_to_level(total_score)
-            conv_data = self.service._conv_state.recompute_stage(request.user_id, risk_level)
+            conv_data = self.service._conv_state.recompute_stage(state["conversation_key"], risk_level)
             intervention_script = self.service.risk_engine._build_intervention(
                 risk_level, request.user_profile.role
             )
@@ -292,7 +303,7 @@ class ChatWorkflowRunner:
             all_matched_rules,
             conv_data,
         ) = self.service._apply_evidence_risk_adjustments(
-            request.user_id,
+            state["conversation_key"],
             total_score,
             risk_level,
             breakdown,
@@ -438,9 +449,11 @@ class ChatWorkflowRunner:
                 "scam_type": state["current_scam_type"],
             }
         ]
-        self.service._history[request.user_id] = new_history[-12:]
+        self.service._history[state["conversation_key"]] = new_history[-12:]
 
         response_preview = {
+            "conversation_id": state["conversation_id"],
+            "emotion": state["emotion"],
             "reply": state["reply"],
             "intent": intent,
             "matched_scams": state["matched_names"],
@@ -463,6 +476,8 @@ class ChatWorkflowRunner:
         return {
             "response": {
                 "reply": state["reply"],
+                "conversation_id": state["conversation_id"],
+                "emotion": state["emotion"],
                 "intent": state["intent"],
                 "matched_scams": state["matched_names"],
                 "risk_level": state["risk_level"],

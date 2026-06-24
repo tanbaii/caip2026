@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import AppShell from '../components/layout/AppShell.vue'
 import LoginPage from '../pages/LoginPage.vue'
+import OverviewPage from '../pages/OverviewPage.vue'
 import ChatPage from '../pages/ChatPage.vue'
 import ReportPage from '../pages/ReportPage.vue'
 import GamePage from '../pages/GamePage.vue'
@@ -22,7 +23,8 @@ const router = createRouter({
       component: AppShell,
       meta: { requiresAuth: true },
       children: [
-        { path: '', redirect: '/chat' },
+        { path: '', redirect: '/overview' },
+        { path: 'overview', component: OverviewPage },
         { path: 'chat', component: ChatPage },
         { path: 'report', component: ReportPage },
         { path: 'game', component: GamePage },
@@ -55,7 +57,7 @@ router.beforeEach(async (to) => {
   }
 
   if (to.path === '/login' && auth.isAuthenticated.value) {
-    return '/chat'
+    return '/overview'
   }
 
   return true

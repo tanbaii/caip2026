@@ -1,5 +1,5 @@
 <template>
-  <BaseCard padding-class="p-6 md:p-8" class="min-h-[520px] space-y-6">
+  <BaseCard padding-class="p-6 md:p-8" class="max-h-[calc(100vh-2rem)] min-h-[520px] space-y-6 overflow-y-auto">
     <div class="flex items-center justify-between gap-4">
       <div>
         <p class="section-kicker">Scenario Player</p>
@@ -25,7 +25,7 @@
       <div v-if="scenario.story && showIntro" class="space-y-4">
         <div class="rounded-3xl bg-gradient-to-br from-purple-50 to-white p-5 ring-1 ring-purple-100/70">
           <p class="text-xs font-black uppercase tracking-widest text-purple-600">案件背景</p>
-          <p class="mt-3 break-words text-sm font-semibold leading-7 text-slate-700">{{ scenario.story }}</p>
+          <p class="mt-3 max-h-48 overflow-y-auto break-words text-sm font-semibold leading-7 text-slate-700">{{ scenario.story }}</p>
           <div v-if="scenario.role" class="mt-3 flex items-center gap-2">
             <span class="rounded-full bg-purple-100 px-2.5 py-0.5 text-xs font-black text-purple-700">你的角色</span>
             <span class="text-sm font-bold text-purple-800">{{ scenario.role }}</span>
@@ -34,7 +34,7 @@
 
         <div v-if="list(scenario.objectives).length" class="rounded-3xl bg-amber-50 p-5 ring-1 ring-amber-100">
           <p class="text-xs font-black uppercase tracking-widest text-amber-700">案件目标</p>
-          <ul class="mt-2 space-y-1.5">
+          <ul class="mt-2 max-h-48 space-y-1.5 overflow-y-auto pr-1">
             <li v-for="(obj, i) in list(scenario.objectives)" :key="i" class="flex gap-2 text-sm font-semibold text-slate-700">
               <span class="text-amber-600">{{ i + 1 }}.</span>
               <span>{{ obj }}</span>
@@ -44,7 +44,7 @@
 
         <div v-if="list(scenario.characters).length" class="space-y-2">
           <p class="text-xs font-black uppercase tracking-widest text-slate-500">涉案人物</p>
-          <div class="grid gap-2 sm:grid-cols-2">
+          <div class="grid max-h-64 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
             <div v-for="ch in list(scenario.characters)" :key="ch.name" class="rounded-2xl border border-slate-100 bg-white p-3">
               <div class="flex items-center justify-between gap-2">
                 <span class="text-sm font-black text-slate-800">{{ ch.name }}</span>
@@ -68,7 +68,7 @@
           <summary class="cursor-pointer p-4 text-sm font-black text-slate-800">
             线索卡片（{{ list(scenario.clues).length }} 条）
           </summary>
-          <div class="space-y-2 px-4 pb-4">
+          <div class="max-h-80 space-y-2 overflow-y-auto px-4 pb-4">
             <div v-for="clue in list(scenario.clues)" :key="clue.id" class="rounded-2xl border border-blue-50 bg-blue-50/40 p-3">
               <div class="flex items-center gap-2">
                 <span class="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-black text-blue-700">{{ clue.id }}</span>
@@ -88,13 +88,13 @@
               <div class="h-full rounded-full bg-blue-600" :style="{ width: `${stepProgress}%` }" />
             </div>
           </div>
-          <p class="mt-4 break-words text-xl font-black leading-9 text-slate-800">{{ scenario.prompt || '暂无剧情内容' }}</p>
+          <p class="mt-4 max-h-64 overflow-y-auto break-words text-xl font-black leading-9 text-slate-800">{{ scenario.prompt || '暂无剧情内容' }}</p>
         </div>
 
         <!-- Feedback -->
         <div v-if="scenario.feedback" class="rounded-3xl border border-blue-100 bg-blue-50 p-5 text-blue-800 shadow-sm shadow-blue-100/70">
           <p class="text-xs font-black uppercase tracking-widest">反馈</p>
-          <p class="mt-2 text-sm font-bold leading-7">{{ scenario.feedback }}</p>
+          <p class="mt-2 max-h-48 overflow-y-auto break-words text-sm font-bold leading-7">{{ scenario.feedback }}</p>
         </div>
 
         <!-- Completion -->
@@ -131,13 +131,13 @@
           <!-- Case Summary -->
           <div v-if="scenario.case_summary" class="rounded-3xl bg-gradient-to-br from-purple-50 to-white p-5 ring-1 ring-purple-100">
             <p class="text-xs font-black uppercase tracking-widest text-purple-600">案件复盘</p>
-            <p class="mt-3 break-words text-sm font-semibold leading-7 text-slate-700">{{ scenario.case_summary }}</p>
+            <p class="mt-3 max-h-48 overflow-y-auto break-words text-sm font-semibold leading-7 text-slate-700">{{ scenario.case_summary }}</p>
           </div>
 
           <!-- Debrief -->
           <div v-if="list(scenario.debrief).length" class="rounded-3xl bg-amber-50 p-5 ring-1 ring-amber-100">
             <p class="text-xs font-black uppercase tracking-widest text-amber-700">反诈知识点</p>
-            <ul class="mt-3 space-y-2">
+            <ul class="mt-3 max-h-64 space-y-2 overflow-y-auto pr-1">
               <li v-for="(point, i) in list(scenario.debrief)" :key="i" class="flex gap-2 text-sm font-semibold leading-6 text-slate-700">
                 <span class="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-amber-200 text-xs font-black text-amber-800">{{ i + 1 }}</span>
                 <span class="min-w-0 break-words">{{ point }}</span>
@@ -147,7 +147,7 @@
         </div>
 
         <!-- Options -->
-        <div v-else class="space-y-3">
+        <div v-else class="max-h-96 space-y-3 overflow-y-auto pr-1">
           <button
             v-for="(option, index) in list(scenario.options)"
             :key="`${index}-${option}`"

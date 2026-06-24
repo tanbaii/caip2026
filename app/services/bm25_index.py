@@ -6,6 +6,7 @@ Adapted from caip2026 sub-project rag_system/utils/bm25_index.py
 """
 
 import pickle
+import sys
 from typing import Any, Dict, List
 
 try:
@@ -17,6 +18,13 @@ try:
     import jieba
 except ImportError:
     jieba = None
+
+
+def _missing_rank_bm25_message() -> str:
+    return (
+        "rank_bm25 is not installed for the Python interpreter running the app "
+        f"({sys.executable}). Run: {sys.executable} -m pip install rank-bm25"
+    )
 
 
 # jieba 初始化：添加反诈领域词典
@@ -71,13 +79,15 @@ class BM25Index:
         self.corpus: List[str] = []
         self.tokenized_corpus: List[List[str]] = []
         self.doc_ids: List[str] = []
+        self.documents: List[Dict[str, Any]] = []
 
     def build(self, documents: List[Dict[str, Any]]) -> "BM25Index":
         if BM25Okapi is None:
-            raise RuntimeError("rank_bm25 is not installed. Run: pip install rank-bm25")
+            raise RuntimeError(_missing_rank_bm25_message())
         self.corpus = []
         self.tokenized_corpus = []
         self.doc_ids = []
+        self.documents = []
 
         for doc in documents:
             content = doc.get("content", "")
@@ -87,6 +97,15 @@ class BM25Index:
             self.corpus.append(content)
             self.doc_ids.append(doc_id)
             self.tokenized_corpus.append(tokenize_chinese(content))
+            self.documents.append({
+                "chunk_id": str(doc_id),
+                "title": str(doc.get("title", "")),
+                "content": str(content),
+                "scam_type": doc.get("scam_type"),
+                "source_type": str(doc.get("source_type", "")),
+                "source_id": str(doc.get("source_id", "")),
+                "metadata": doc.get("metadata", {}),
+            })
 
         self.bm25 = BM25Okapi(self.tokenized_corpus)
         return self
@@ -98,6 +117,7 @@ class BM25Index:
         query_tokens = tokenize_chinese(query)
         if not query_tokens:
             return []
+        query_token_set = set(query_tokens)
 
         scores = self.bm25.get_scores(query_tokens)
         top_indices = scores.argsort()[-top_k:][::-1]
@@ -105,14 +125,20 @@ class BM25Index:
         results = []
         for idx in top_indices:
             score = float(scores[idx])
-            if score <= 0:
+            has_overlap = bool(query_token_set & set(self.tokenized_corpus[idx]))
+            if score <= 0 and not has_overlap:
                 continue
-            results.append({
+            document = dict(self.documents[idx]) if idx < len(self.documents) else {
+                "chunk_id": str(self.doc_ids[idx]),
+                "content": self.corpus[idx],
+            }
+            document.update({
                 "chunk_id": str(self.doc_ids[idx]),
                 "score": score,
                 "index": int(idx),
                 "source": "bm25",
             })
+            results.append(document)
         return results
 
     def save(self, path: Any) -> None:
@@ -123,13 +149,14 @@ class BM25Index:
             "corpus": self.corpus,
             "tokenized_corpus": self.tokenized_corpus,
             "doc_ids": self.doc_ids,
+            "documents": self.documents,
         }
         with open(_path, "wb") as f:
             pickle.dump(data, f)
 
     def load(self, path: Any) -> "BM25Index":
         if BM25Okapi is None:
-            raise RuntimeError("rank_bm25 is not installed. Run: pip install rank-bm25")
+            raise RuntimeError(_missing_rank_bm25_message())
         _path = str(path)
         if not __import__("os").path.exists(_path):
             raise FileNotFoundError(f"BM25 index not found: {_path}")
@@ -138,5 +165,17 @@ class BM25Index:
         self.corpus = data["corpus"]
         self.tokenized_corpus = data["tokenized_corpus"]
         self.doc_ids = data["doc_ids"]
+        self.documents = data.get("documents") or [
+            {
+                "chunk_id": str(doc_id),
+                "content": content,
+                "title": "",
+                "scam_type": None,
+                "source_type": "",
+                "source_id": "",
+                "metadata": {},
+            }
+            for doc_id, content in zip(self.doc_ids, self.corpus)
+        ]
         self.bm25 = BM25Okapi(self.tokenized_corpus)
         return self

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any, Dict, List
 
 try:
@@ -101,16 +102,29 @@ class HybridRetriever:
         self,
         dense_retriever: Any = None,
         bm25_index: Any = None,
+        bm25_index_path: Any = None,
         reranker: Any = None,
     ) -> None:
         self.dense_retriever = dense_retriever
         self.reranker = reranker
+        self.bm25_index_path = Path(bm25_index_path) if bm25_index_path else None
         if bm25_index is not None:
             self.bm25_index = bm25_index
         elif BM25Index is not None:
             self.bm25_index = BM25Index()
+            if self.bm25_index_path and self.bm25_index_path.exists():
+                try:
+                    self.bm25_index.load(self.bm25_index_path)
+                except Exception:
+                    logger.warning("Failed to load BM25 index: %s", self.bm25_index_path, exc_info=True)
         else:
             self.bm25_index = None
+
+    @property
+    def bm25_docs(self) -> int:
+        if self.bm25_index is None:
+            return 0
+        return len(getattr(self.bm25_index, "corpus", []) or [])
 
     def build_bm25_index(self, documents: List[Dict[str, Any]]) -> "HybridRetriever":
         """从文档列表构建 BM25 索引

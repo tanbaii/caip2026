@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -53,12 +54,37 @@ class SQLiteStorage:
                     user_id INTEGER NOT NULL,
                     score INTEGER NOT NULL,
                     verdict TEXT NOT NULL,
+                    risk_level TEXT NOT NULL DEFAULT 'low',
+                    channel TEXT NOT NULL DEFAULT 'web',
                     matched_keywords_json TEXT NOT NULL,
+                    matched_rules_json TEXT NOT NULL DEFAULT '[]',
                     url_host TEXT,
+                    url TEXT,
+                    normalized_url TEXT,
                     content_summary TEXT,
+                    content TEXT,
+                    content_hash TEXT,
                     reasons_json TEXT NOT NULL DEFAULT '[]',
+                    url_flags_json TEXT NOT NULL DEFAULT '[]',
+                    score_breakdown_json TEXT NOT NULL DEFAULT '{}',
+                    ruleset_versions_json TEXT NOT NULL DEFAULT '{}',
                     status TEXT NOT NULL DEFAULT 'pending',
-                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    reviewer TEXT,
+                    review_note TEXT,
+                    reviewed_at TEXT,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS chat_conversations (
+                    conversation_id TEXT PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    title TEXT NOT NULL DEFAULT '新对话',
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
                 """
             )
@@ -66,6 +92,7 @@ class SQLiteStorage:
                 """
                 CREATE TABLE IF NOT EXISTS chat_messages (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    conversation_id TEXT,
                     user_id INTEGER NOT NULL,
                     user_message TEXT NOT NULL,
                     assistant_reply TEXT NOT NULL,
@@ -111,15 +138,124 @@ class SQLiteStorage:
                 """
             )
             self._ensure_column(conn, "reports", "url_host", "TEXT")
+            self._ensure_column(conn, "reports", "url", "TEXT")
+            self._ensure_column(conn, "reports", "normalized_url", "TEXT")
             self._ensure_column(conn, "reports", "content_summary", "TEXT")
+            self._ensure_column(conn, "reports", "content", "TEXT")
+            self._ensure_column(conn, "reports", "content_hash", "TEXT")
+            self._ensure_column(conn, "reports", "channel", "TEXT NOT NULL DEFAULT 'web'")
+            self._ensure_column(conn, "reports", "risk_level", "TEXT NOT NULL DEFAULT 'low'")
             self._ensure_column(conn, "reports", "reasons_json", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column(conn, "reports", "matched_rules_json", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column(conn, "reports", "url_flags_json", "TEXT NOT NULL DEFAULT '[]'")
+            self._ensure_column(conn, "reports", "score_breakdown_json", "TEXT NOT NULL DEFAULT '{}'")
+            self._ensure_column(conn, "reports", "ruleset_versions_json", "TEXT NOT NULL DEFAULT '{}'")
             self._ensure_column(conn, "reports", "status", "TEXT NOT NULL DEFAULT 'pending'")
+            self._ensure_column(conn, "reports", "reviewer", "TEXT")
+            self._ensure_column(conn, "reports", "review_note", "TEXT")
+            self._ensure_column(conn, "reports", "reviewed_at", "TEXT")
+            self._ensure_column(conn, "reports", "updated_at", "TEXT")
+            conn.execute(
+                """
+                UPDATE reports
+                SET updated_at = COALESCE(NULLIF(updated_at, ''), created_at, CURRENT_TIMESTAMP)
+                WHERE updated_at IS NULL OR updated_at = ''
+                """
+            )
+            self._ensure_column(conn, "chat_messages", "conversation_id", "TEXT")
+            conn.execute(
+                """
+                UPDATE chat_messages
+                SET conversation_id = 'default-' || user_id
+                WHERE conversation_id IS NULL OR conversation_id = ''
+                """
+            )
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO chat_conversations (
+                    conversation_id, user_id, title, created_at, updated_at
+                )
+                SELECT
+                    conversation_id,
+                    user_id,
+                    '历史对话',
+                    MIN(created_at),
+                    MAX(created_at)
+                FROM chat_messages
+                WHERE conversation_id IS NOT NULL AND conversation_id != ''
+                GROUP BY conversation_id, user_id
+                """
+            )
             conn.commit()
+
+    @staticmethod
+    def default_chat_conversation_id(user_id: int) -> str:
+        return f"default-{int(user_id)}"
+
+    def create_chat_conversation(
+        self,
+        *,
+        user_id: int,
+        title: str = "新对话",
+        conversation_id: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_id = conversation_id or uuid.uuid4().hex
+        normalized_title = title.strip()[:80] if title.strip() else "新对话"
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO chat_conversations (
+                    conversation_id, user_id, title
+                ) VALUES (?, ?, ?)
+                """,
+                (normalized_id, int(user_id), normalized_title),
+            )
+            conn.commit()
+        conversation = self.get_chat_conversation(user_id=user_id, conversation_id=normalized_id)
+        if conversation is None:
+            raise RuntimeError("对话窗口创建失败")
+        return conversation
+
+    def get_chat_conversation(
+        self,
+        *,
+        user_id: int,
+        conversation_id: str,
+    ) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute(
+                """
+                SELECT conversation_id, user_id, title, created_at, updated_at
+                FROM chat_conversations
+                WHERE user_id = ? AND conversation_id = ?
+                """,
+                (int(user_id), conversation_id),
+            ).fetchone()
+        return self._chat_conversation_row(row) if row else None
+
+    def ensure_chat_conversation(
+        self,
+        *,
+        user_id: int,
+        conversation_id: str | None,
+        title_hint: str = "",
+    ) -> dict[str, Any]:
+        normalized_id = conversation_id or self.default_chat_conversation_id(user_id)
+        existing = self.get_chat_conversation(user_id=user_id, conversation_id=normalized_id)
+        if existing is not None:
+            return existing
+        title = title_hint.strip()[:28] if title_hint.strip() else "新对话"
+        return self.create_chat_conversation(
+            user_id=user_id,
+            conversation_id=normalized_id,
+            title=title,
+        )
 
     def add_chat_message(
         self,
         *,
         user_id: int,
+        conversation_id: str | None = None,
         user_message: str,
         assistant_reply: str,
         risk_level: str,
@@ -128,16 +264,23 @@ class SQLiteStorage:
         matched_scams: list[str],
         session_stage: str,
     ) -> None:
+        conversation = self.ensure_chat_conversation(
+            user_id=user_id,
+            conversation_id=conversation_id,
+            title_hint=user_message,
+        )
+        normalized_id = str(conversation["conversation_id"])
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO chat_messages (
-                    user_id, user_message, assistant_reply, risk_level, risk_score,
+                    conversation_id, user_id, user_message, assistant_reply, risk_level, risk_score,
                     intent, matched_scams_json, session_stage
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
+                    normalized_id,
                     user_id,
                     user_message,
                     assistant_reply,
@@ -148,6 +291,16 @@ class SQLiteStorage:
                     session_stage,
                 ),
             )
+            conn.execute(
+                """
+                UPDATE chat_conversations
+                SET
+                    title = CASE WHEN title = '新对话' THEN ? ELSE title END,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE user_id = ? AND conversation_id = ?
+                """,
+                ((user_message.strip()[:28] or "新对话"), int(user_id), normalized_id),
+            )
             conn.commit()
 
     def list_chat_messages(self, user_id: int, limit: int = 50) -> list[dict[str, Any]]:
@@ -155,7 +308,7 @@ class SQLiteStorage:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT id, user_id, user_message, assistant_reply, risk_level,
+                SELECT id, conversation_id, user_id, user_message, assistant_reply, risk_level,
                        risk_score, intent, matched_scams_json, session_stage, created_at
                 FROM chat_messages
                 WHERE user_id = ?
@@ -167,6 +320,7 @@ class SQLiteStorage:
         items = [
             {
                 "id": int(row["id"]),
+                "conversation_id": str(row["conversation_id"] or ""),
                 "user_id": int(row["user_id"]),
                 "user_message": str(row["user_message"]),
                 "assistant_reply": str(row["assistant_reply"]),
@@ -180,6 +334,124 @@ class SQLiteStorage:
             for row in rows
         ]
         return list(reversed(items))
+
+    @staticmethod
+    def _chat_message_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "id": int(row["id"]),
+            "conversation_id": str(row["conversation_id"] or ""),
+            "user_id": int(row["user_id"]),
+            "user_message": str(row["user_message"]),
+            "assistant_reply": str(row["assistant_reply"]),
+            "risk_level": str(row["risk_level"]),
+            "risk_score": int(row["risk_score"]),
+            "intent": str(row["intent"]),
+            "matched_scams": json.loads(row["matched_scams_json"] or "[]"),
+            "session_stage": str(row["session_stage"]),
+            "created_at": str(row["created_at"]),
+        }
+
+    @staticmethod
+    def _chat_conversation_row(row: sqlite3.Row) -> dict[str, Any]:
+        return {
+            "conversation_id": str(row["conversation_id"]),
+            "user_id": int(row["user_id"]),
+            "title": str(row["title"] or "新对话"),
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"]),
+        }
+
+    def list_chat_conversations(self, user_id: int, limit: int = 50) -> list[dict[str, Any]]:
+        normalized_limit = max(1, min(200, int(limit)))
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    c.conversation_id,
+                    c.user_id,
+                    c.title,
+                    c.created_at,
+                    MAX(m.created_at) AS updated_at,
+                    COUNT(m.id) AS message_count,
+                    latest.user_message AS preview,
+                    latest.risk_level AS risk_level,
+                    latest.risk_score AS risk_score
+                FROM chat_conversations c
+                JOIN chat_messages m
+                    ON m.conversation_id = c.conversation_id
+                    AND m.user_id = c.user_id
+                JOIN chat_messages latest
+                    ON latest.id = (
+                        SELECT id
+                        FROM chat_messages
+                        WHERE user_id = c.user_id
+                            AND conversation_id = c.conversation_id
+                        ORDER BY created_at DESC, id DESC
+                        LIMIT 1
+                    )
+                WHERE c.user_id = ?
+                GROUP BY c.conversation_id, c.user_id, c.title, c.created_at
+                ORDER BY updated_at DESC, c.conversation_id DESC
+                LIMIT ?
+                """,
+                (int(user_id), normalized_limit),
+            ).fetchall()
+        return [
+            {
+                "conversation_id": str(row["conversation_id"]),
+                "user_id": int(row["user_id"]),
+                "title": str(row["title"] or "新对话"),
+                "message_count": int(row["message_count"] or 0),
+                "risk_level": str(row["risk_level"] or "low"),
+                "risk_score": int(row["risk_score"] or 0),
+                "preview": str(row["preview"] or ""),
+                "created_at": str(row["created_at"]),
+                "updated_at": str(row["updated_at"] or row["created_at"]),
+            }
+            for row in rows
+        ]
+
+    def list_chat_conversation_messages(
+        self,
+        *,
+        user_id: int,
+        conversation_id: str,
+    ) -> list[dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, conversation_id, user_id, user_message, assistant_reply, risk_level,
+                       risk_score, intent, matched_scams_json, session_stage, created_at
+                FROM chat_messages
+                WHERE user_id = ? AND conversation_id = ?
+                ORDER BY created_at ASC, id ASC
+                """,
+                (int(user_id), conversation_id),
+            ).fetchall()
+        return [self._chat_message_row(row) for row in rows]
+
+    def delete_chat_conversation(self, *, user_id: int, conversation_id: str) -> bool:
+        with self._connect() as conn:
+            existing = conn.execute(
+                """
+                SELECT conversation_id
+                FROM chat_conversations
+                WHERE user_id = ? AND conversation_id = ?
+                """,
+                (int(user_id), conversation_id),
+            ).fetchone()
+            if existing is None:
+                return False
+            conn.execute(
+                "DELETE FROM chat_messages WHERE user_id = ? AND conversation_id = ?",
+                (int(user_id), conversation_id),
+            )
+            conn.execute(
+                "DELETE FROM chat_conversations WHERE user_id = ? AND conversation_id = ?",
+                (int(user_id), conversation_id),
+            )
+            conn.commit()
+        return True
 
     def create_rule_version(
         self,
@@ -464,29 +736,53 @@ class SQLiteStorage:
         score: int,
         verdict: str,
         matched_keywords: list[str],
+        risk_level: str = "low",
+        channel: str = "web",
+        matched_rules: list[dict[str, Any]] | None = None,
         url_host: str | None = None,
+        url: str | None = None,
+        normalized_url: str | None = None,
         content_summary: str | None = None,
+        content: str | None = None,
+        content_hash: str | None = None,
         reasons: list[str] | None = None,
+        url_flags: list[str] | None = None,
+        score_breakdown: dict[str, Any] | None = None,
+        ruleset_versions: dict[str, str] | None = None,
         status: str = "pending",
     ) -> None:
         with self._connect() as conn:
             conn.execute(
                 """
                 INSERT INTO reports (
-                    report_id, user_id, score, verdict, matched_keywords_json,
-                    url_host, content_summary, reasons_json, status
+                    report_id, user_id, score, verdict, risk_level, channel,
+                    matched_keywords_json, matched_rules_json,
+                    url_host, url, normalized_url,
+                    content_summary, content, content_hash,
+                    reasons_json, url_flags_json, score_breakdown_json,
+                    ruleset_versions_json, status
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     report_id,
                     user_id,
                     int(score),
                     verdict,
+                    risk_level,
+                    channel,
                     json.dumps(sorted(set(matched_keywords)), ensure_ascii=False),
+                    json.dumps(matched_rules or [], ensure_ascii=False),
                     url_host,
+                    url,
+                    normalized_url,
                     content_summary,
+                    content,
+                    content_hash,
                     json.dumps(reasons or [], ensure_ascii=False),
+                    json.dumps(url_flags or [], ensure_ascii=False),
+                    json.dumps(score_breakdown or {}, ensure_ascii=False),
+                    json.dumps(ruleset_versions or {}, ensure_ascii=False),
                     status,
                 ),
             )
@@ -502,8 +798,7 @@ class SQLiteStorage:
         normalized_limit = max(1, min(100, int(limit)))
         sql = (
             """
-            SELECT report_id, user_id, score, verdict, matched_keywords_json,
-                   url_host, content_summary, reasons_json, status, created_at
+            SELECT *
             FROM reports
             WHERE user_id = ?
             """
@@ -524,30 +819,213 @@ class SQLiteStorage:
         with self._connect() as conn:
             rows = conn.execute(sql, tuple(params)).fetchall()
 
-        return [
-            {
-                "report_id": str(row["report_id"]),
-                "user_id": int(row["user_id"]),
-                "score": int(row["score"]),
-                "verdict": str(row["verdict"]),
-                "matched_keywords": json.loads(row["matched_keywords_json"]),
-                "url_host": str(row["url_host"]) if row["url_host"] else None,
-                "content_summary": str(row["content_summary"]) if row["content_summary"] else None,
-                "reasons": json.loads(row["reasons_json"] or "[]"),
-                "status": str(row["status"] or "pending"),
-                "created_at": str(row["created_at"]),
-            }
-            for row in rows
-        ]
+        return [self._report_row(row) for row in rows]
+
+    def get_report(self, report_id: str) -> dict[str, Any] | None:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM reports WHERE report_id = ?", (report_id,)).fetchone()
+        return self._report_row(row) if row else None
+
+    def find_recent_duplicate_report(
+        self,
+        *,
+        user_id: int,
+        normalized_url: str | None,
+        content_hash: str | None,
+    ) -> dict[str, Any] | None:
+        clauses = ["user_id = ?", "created_at >= datetime('now', '-24 hours')"]
+        params: list[Any] = [int(user_id)]
+        if normalized_url:
+            duplicate_clause = "normalized_url = ?"
+            params.append(normalized_url)
+        elif content_hash:
+            duplicate_clause = "content_hash = ?"
+            params.append(content_hash)
+        else:
+            return None
+
+        sql = f"""
+            SELECT *
+            FROM reports
+            WHERE {' AND '.join(clauses)} AND {duplicate_clause}
+            ORDER BY created_at DESC, report_id DESC
+            LIMIT 1
+        """
+        with self._connect() as conn:
+            row = conn.execute(sql, tuple(params)).fetchone()
+        return self._report_row(row) if row else None
+
+    def list_admin_reports(
+        self,
+        *,
+        page: int = 1,
+        page_size: int = 20,
+        status: str | None = None,
+        risk_level: str | None = None,
+        verdict: str | None = None,
+        channel: str | None = None,
+        user_id: int | None = None,
+        keyword: str | None = None,
+        start_time: str | None = None,
+        end_time: str | None = None,
+    ) -> dict[str, Any]:
+        normalized_page = max(1, int(page))
+        normalized_page_size = max(1, min(100, int(page_size)))
+        where: list[str] = []
+        params: list[Any] = []
+
+        for column, value in (
+            ("status", status),
+            ("risk_level", risk_level),
+            ("verdict", verdict),
+            ("channel", channel),
+        ):
+            if value:
+                where.append(f"{column} = ?")
+                params.append(value)
+        if user_id is not None:
+            where.append("user_id = ?")
+            params.append(int(user_id))
+        if start_time:
+            where.append("created_at >= ?")
+            params.append(start_time)
+        if end_time:
+            where.append("created_at <= ?")
+            params.append(end_time)
+        if keyword:
+            like = f"%{self._escape_like(keyword)}%"
+            where.append(
+                """
+                (
+                    content LIKE ? ESCAPE '\\'
+                    OR content_summary LIKE ? ESCAPE '\\'
+                    OR url LIKE ? ESCAPE '\\'
+                    OR matched_keywords_json LIKE ? ESCAPE '\\'
+                    OR reasons_json LIKE ? ESCAPE '\\'
+                )
+                """
+            )
+            params.extend([like, like, like, like, like])
+
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
+        count_sql = f"SELECT COUNT(*) AS total FROM reports {where_sql}"
+        list_sql = f"""
+            SELECT *
+            FROM reports
+            {where_sql}
+            ORDER BY created_at DESC, report_id DESC
+            LIMIT ? OFFSET ?
+        """
+
+        with self._connect() as conn:
+            total = int(conn.execute(count_sql, tuple(params)).fetchone()["total"])
+            rows = conn.execute(
+                list_sql,
+                tuple(params + [normalized_page_size, (normalized_page - 1) * normalized_page_size]),
+            ).fetchall()
+
+        return {
+            "total": total,
+            "page": normalized_page,
+            "page_size": normalized_page_size,
+            "items": [self._report_row(row) for row in rows],
+        }
 
     def update_report_status(self, report_id: str, status: str) -> bool:
         with self._connect() as conn:
             cursor = conn.execute(
-                "UPDATE reports SET status = ? WHERE report_id = ?",
+                "UPDATE reports SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE report_id = ?",
                 (status, report_id),
             )
             conn.commit()
         return cursor.rowcount > 0
+
+    def review_report(
+        self,
+        *,
+        report_id: str,
+        status: str,
+        reviewer: str | None = None,
+        review_note: str | None = None,
+        verdict: str | None = None,
+        risk_level: str | None = None,
+        score: int | None = None,
+    ) -> dict[str, Any] | None:
+        assignments = [
+            "status = ?",
+            "reviewer = ?",
+            "review_note = ?",
+            "reviewed_at = CURRENT_TIMESTAMP",
+            "updated_at = CURRENT_TIMESTAMP",
+        ]
+        params: list[Any] = [status, reviewer, review_note]
+
+        if verdict is not None:
+            assignments.append("verdict = ?")
+            params.append(verdict)
+        if risk_level is not None:
+            assignments.append("risk_level = ?")
+            params.append(risk_level)
+        if score is not None:
+            assignments.append("score = ?")
+            params.append(int(score))
+
+        params.append(report_id)
+        sql = f"UPDATE reports SET {', '.join(assignments)} WHERE report_id = ?"
+
+        with self._connect() as conn:
+            cursor = conn.execute(sql, tuple(params))
+            conn.commit()
+        if cursor.rowcount <= 0:
+            return None
+        return self.get_report(report_id)
+
+    @staticmethod
+    def _escape_like(value: str) -> str:
+        return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+    @staticmethod
+    def _json_loads(value: Any, default: Any) -> Any:
+        try:
+            return json.loads(value or json.dumps(default))
+        except (TypeError, json.JSONDecodeError):
+            return default
+
+    @classmethod
+    def _report_row(cls, row: sqlite3.Row) -> dict[str, Any]:
+        verdict = str(row["verdict"])
+        risk_level = str(row["risk_level"] or "")
+        if not risk_level or risk_level == "low":
+            risk_level = {"safe": "low", "suspicious": "medium", "high_risk": "high"}.get(verdict, "low")
+        score_breakdown = cls._json_loads(row["score_breakdown_json"], {})
+        return {
+            "report_id": str(row["report_id"]),
+            "user_id": int(row["user_id"]),
+            "score": int(row["score"]),
+            "risk_score": int(row["score"]),
+            "risk_level": risk_level,
+            "verdict": verdict,
+            "channel": str(row["channel"] or "web"),
+            "matched_keywords": cls._json_loads(row["matched_keywords_json"], []),
+            "matched_rules": cls._json_loads(row["matched_rules_json"], []),
+            "url_host": str(row["url_host"]) if row["url_host"] else None,
+            "url": str(row["url"]) if row["url"] else None,
+            "normalized_url": str(row["normalized_url"]) if row["normalized_url"] else None,
+            "content_summary": str(row["content_summary"]) if row["content_summary"] else None,
+            "content": str(row["content"]) if row["content"] else None,
+            "content_hash": str(row["content_hash"]) if row["content_hash"] else None,
+            "reasons": cls._json_loads(row["reasons_json"], []),
+            "url_flags": cls._json_loads(row["url_flags_json"], []),
+            "score_breakdown": score_breakdown,
+            "risk_breakdown": score_breakdown,
+            "ruleset_versions": cls._json_loads(row["ruleset_versions_json"], {}),
+            "status": str(row["status"] or "pending"),
+            "reviewer": str(row["reviewer"]) if row["reviewer"] else None,
+            "review_note": str(row["review_note"]) if row["review_note"] else None,
+            "reviewed_at": str(row["reviewed_at"]) if row["reviewed_at"] else None,
+            "created_at": str(row["created_at"]),
+            "updated_at": str(row["updated_at"] or row["created_at"]),
+        }
 
     # ── 用户认证 CRUD ──
 
@@ -697,7 +1175,8 @@ class SQLiteStorage:
             recent_reports = conn.execute(
                 """
                 SELECT report_id, user_id, score, verdict, matched_keywords_json,
-                       url_host, content_summary, reasons_json, status, created_at
+                       url_host, content_summary, reasons_json, status, created_at,
+                       updated_at, reviewer, review_note, reviewed_at
                 FROM reports
                 ORDER BY created_at DESC, report_id DESC
                 LIMIT 12
@@ -815,6 +1294,10 @@ class SQLiteStorage:
                         "reasons": json.loads(row["reasons_json"] or "[]"),
                         "status": str(row["status"] or "pending"),
                         "created_at": str(row["created_at"]),
+                        "updated_at": str(row["updated_at"] or row["created_at"]),
+                        "reviewer": str(row["reviewer"]) if row["reviewer"] else None,
+                        "review_note": str(row["review_note"]) if row["review_note"] else None,
+                        "reviewed_at": str(row["reviewed_at"]) if row["reviewed_at"] else None,
                     }
                     for row in recent_reports
                 ],

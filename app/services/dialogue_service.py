@@ -21,6 +21,55 @@ from app.services.risk_engine import RiskEngine
 from app.services.risk_dimensions import build_risk_dimensions, overall_level_from_dimensions
 from app.services.sanitizer import sanitize_text
 
+EmotionLabel = str
+
+_ANXIOUS_EMOTION_TERMS = (
+    "怎么办",
+    "害怕",
+    "慌",
+    "焦虑",
+    "担心",
+    "来不及",
+    "催我",
+    "马上",
+    "立刻",
+    "赶紧",
+    "急",
+    "一直催",
+    "不处理就",
+    "否则",
+)
+_NEGATIVE_EMOTION_TERMS = (
+    "生气",
+    "烦",
+    "崩溃",
+    "绝望",
+    "被骗了",
+    "后悔",
+    "难受",
+)
+_POSITIVE_EMOTION_TERMS = (
+    "谢谢",
+    "放心",
+    "已经解决",
+    "明白了",
+    "学到了",
+)
+
+
+def infer_emotion_signal(message: str, explicit_emotion: str | None = None) -> EmotionLabel:
+    if explicit_emotion:
+        return explicit_emotion
+
+    normalized = message.strip().lower()
+    if any(term in normalized for term in _ANXIOUS_EMOTION_TERMS):
+        return "anxious"
+    if any(term in normalized for term in _NEGATIVE_EMOTION_TERMS):
+        return "negative"
+    if any(term in normalized for term in _POSITIVE_EMOTION_TERMS):
+        return "positive"
+    return "neutral"
+
 
 class DialogueService:
     def __init__(
@@ -45,16 +94,87 @@ class DialogueService:
         self.ai_risk_assessor = ai_risk_assessor
         self.storage = storage
         self._history: dict[str, list[dict[str, str]]] = {}
+        self._skip_restore_keys: set[str] = set()
         self._url_pattern = re.compile(r"(https?://\S+|www\.\S+)", re.IGNORECASE)
         self._conv_state = ConversationStateManager()
 
-    def reset_conversation(self, user_id: int) -> None:
-        self._history.pop(user_id, None)
-        self._conv_state.reset(user_id)
+    def _default_conversation_id(self, user_id: int) -> str:
+        if self.storage and hasattr(self.storage, "default_chat_conversation_id"):
+            return str(self.storage.default_chat_conversation_id(user_id))
+        return f"default-{int(user_id)}"
+
+    @staticmethod
+    def _conversation_key(user_id: int, conversation_id: str) -> str:
+        return f"{int(user_id)}:{conversation_id}"
+
+    def _conversation_key_for_request(self, request: ChatRequest) -> str:
+        return self._conversation_key(
+            request.user_id,
+            request.conversation_id or self._default_conversation_id(request.user_id),
+        )
+
+    def _ensure_conversation_id(self, request: ChatRequest) -> str:
+        conversation_id = request.conversation_id or self._default_conversation_id(request.user_id)
+        if self.storage and hasattr(self.storage, "ensure_chat_conversation"):
+            conversation = self.storage.ensure_chat_conversation(
+                user_id=request.user_id,
+                conversation_id=conversation_id,
+                title_hint=request.message,
+            )
+            return str(conversation["conversation_id"])
+        return conversation_id
+
+    def _restore_persisted_conversation(self, user_id: int, conversation_id: str) -> None:
+        if not self.storage or not hasattr(self.storage, "list_chat_conversation_messages"):
+            return
+        key = self._conversation_key(user_id, conversation_id)
+        if key in self._skip_restore_keys:
+            self._skip_restore_keys.discard(key)
+            return
+        if key in self._history:
+            return
+        messages = self.storage.list_chat_conversation_messages(
+            user_id=user_id,
+            conversation_id=conversation_id,
+        )
+        if not messages:
+            return
+        self._conv_state.reset(key)
+        restored_history: list[dict[str, str]] = []
+        for item in messages[-12:]:
+            self._conv_state.update_and_get(
+                user_id=key,
+                message=str(item.get("user_message", "")),
+                risk_level=str(item.get("risk_level", "low")),
+                intent=str(item.get("intent", "")),
+                matched_scams=[],
+            )
+            restored_history.append(
+                {
+                    "message": sanitize_text(str(item.get("user_message", ""))),
+                    "intent": str(item.get("intent", "")),
+                    "risk_level": str(item.get("risk_level", "low")),
+                    "risk_score": str(item.get("risk_score", 0)),
+                    "scam_type": "",
+                }
+            )
+        self._history[key] = restored_history[-12:]
+
+    def reset_conversation(self, user_id: int, conversation_id: str | None = None) -> None:
+        normalized_id = conversation_id or self._default_conversation_id(user_id)
+        key = self._conversation_key(user_id, normalized_id)
+        self._history.pop(key, None)
+        self._skip_restore_keys.add(key)
+        self._conv_state.reset(key)
 
     def process_chat(self, request: ChatRequest) -> dict[str, Any]:
         start_time = time.perf_counter()
-        history = self._history.get(request.user_id, [])
+        conversation_id = self._ensure_conversation_id(request)
+        request = request.model_copy(update={"conversation_id": conversation_id})
+        conversation_key = self._conversation_key(request.user_id, conversation_id)
+        self._restore_persisted_conversation(request.user_id, conversation_id)
+        history = self._history.get(conversation_key, [])
+        emotion = infer_emotion_signal(request.message, request.emotion)
 
         intent, _, _ = self.intent_recognizer.detect_intent(request.message, history)
         matched_scams = self.knowledge_base.search_scams(request.message)
@@ -63,15 +183,15 @@ class DialogueService:
 
         if _is_new_explicit_scam_topic(history, current_scam_type):
             history = []
-            self._history[request.user_id] = []
-            self._conv_state.reset(request.user_id)
+            self._history[conversation_key] = []
+            self._conv_state.reset(conversation_key)
             intent, _, _ = self.intent_recognizer.detect_intent(request.message, history)
 
         risk = self.risk_engine.evaluate_text(
             request.message,
             matched_scams,
             request.user_profile.role,
-            request.emotion,
+            emotion,
         )
 
         url_bonus = 0
@@ -94,7 +214,7 @@ class DialogueService:
 
         # --- Multi-turn conversation state ---
         conv_data = self._conv_state.update_and_get(
-            user_id=request.user_id,
+            user_id=conversation_key,
             message=request.message,
             risk_level=risk_level,
             intent=intent,
@@ -102,7 +222,7 @@ class DialogueService:
         )
 
         conv_bonus, conv_rules, conv_reasons = self._conv_state.compute_conversation_bonus(
-            request.user_id,
+            conversation_key,
         )
 
         if conv_bonus > 0:
@@ -115,7 +235,7 @@ class DialogueService:
             intervention_script = self.risk_engine._build_intervention(risk_level, request.user_profile.role)
             recommendations = self.risk_engine._build_recommendations(risk_level)
             # Recompute stage + pending_questions against final risk_level
-            conv_data = self._conv_state.recompute_stage(request.user_id, risk_level)
+            conv_data = self._conv_state.recompute_stage(conversation_key, risk_level)
 
         (
             total_score,
@@ -126,7 +246,7 @@ class DialogueService:
             all_matched_rules,
             conv_data,
         ) = self._apply_evidence_risk_adjustments(
-            request.user_id,
+            conversation_key,
             total_score,
             risk_level,
             breakdown,
@@ -149,7 +269,7 @@ class DialogueService:
             risk_level = self.risk_engine._score_to_level(total_score)
             intervention_script = self.risk_engine._build_intervention(risk_level, request.user_profile.role)
             recommendations = self.risk_engine._build_recommendations(risk_level)
-            conv_data = self._conv_state.recompute_stage(request.user_id, risk_level)
+            conv_data = self._conv_state.recompute_stage(conversation_key, risk_level)
 
         (
             total_score,
@@ -178,7 +298,7 @@ class DialogueService:
             all_matched_rules,
             conv_data,
         ) = self._apply_evidence_risk_adjustments(
-            request.user_id,
+            conversation_key,
             total_score,
             risk_level,
             breakdown,
@@ -261,11 +381,13 @@ class DialogueService:
                 "scam_type": current_scam_type,
             }
         ]
-        self._history[request.user_id] = new_history[-12:]
+        self._history[conversation_key] = new_history[-12:]
 
         latency_ms = round((time.perf_counter() - start_time) * 1000, 2)
 
         response = {
+            "conversation_id": conversation_id,
+            "emotion": emotion,
             "reply": reply,
             "intent": intent,
             "matched_scams": matched_names,
@@ -309,6 +431,7 @@ class DialogueService:
         try:
             self.storage.add_chat_message(
                 user_id=user_id,
+                conversation_id=str(response.get("conversation_id", "")) or None,
                 user_message=sanitize_text(user_message),
                 assistant_reply=sanitize_text(str(response.get("reply", ""))),
                 risk_level=str(response.get("risk_level", "low")),
@@ -487,7 +610,10 @@ class DialogueService:
                     "rationale": fact_rule["rationale"],
                 },
             ]
-            conv_data = self._conv_state.recompute_stage(request.user_id, risk_level)
+            conv_data = self._conv_state.recompute_stage(
+                self._conversation_key_for_request(request),
+                risk_level,
+            )
 
         if not self.ai_risk_assessor:
             breakdown.setdefault("ai_assessment", {"enabled": False})
@@ -531,7 +657,10 @@ class DialogueService:
             risk_level = merged.final_level
             breakdown["ai_score"] = merged.ai_score_delta
             breakdown["total"] = total_score
-            conv_data = self._conv_state.recompute_stage(request.user_id, risk_level)
+            conv_data = self._conv_state.recompute_stage(
+                self._conversation_key_for_request(request),
+                risk_level,
+            )
 
         return (
             total_score,

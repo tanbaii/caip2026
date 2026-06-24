@@ -14,3 +14,7 @@ export function getUserReports(userId, params = {}) {
   const suffix = query.toString() ? `?${query.toString()}` : ''
   return get(`/users/${encodeURIComponent(userId)}/reports${suffix}`)
 }
+
+export function getReportDetail(reportId) {
+  return get(`/reports/${encodeURIComponent(reportId)}`)
+}

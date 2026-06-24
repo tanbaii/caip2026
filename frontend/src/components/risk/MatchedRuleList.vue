@@ -1,13 +1,13 @@
 <template>
   <section class="space-y-3">
     <h3 class="text-sm font-black text-slate-900">命中规则</h3>
-    <div v-if="items.length" class="space-y-2">
+    <div v-if="items.length" class="max-h-80 space-y-2 overflow-y-auto pr-1">
       <div v-for="(rule, index) in items" :key="index" class="rounded-2xl border border-slate-100 bg-white p-3">
         <div class="flex items-center justify-between gap-2">
           <span class="min-w-0 truncate text-sm font-black text-slate-800">{{ ruleName(rule.rule) }}</span>
           <span class="shrink-0 rounded-full px-2 py-0.5 text-xs font-black" :class="weightClass(rule.weight)">+{{ rule.weight }}</span>
         </div>
-        <p class="mt-1 text-xs font-semibold leading-5 text-slate-500">{{ rule.reason }}</p>
+        <p class="mt-1 break-words text-xs font-semibold leading-5 text-slate-500">{{ rule.reason }}</p>
         <p v-if="rule.rule_version || rule.ruleset_version" class="mt-1 text-[11px] font-black text-slate-400">
           规则 v{{ rule.rule_version || '-' }} · 规则集 v{{ rule.ruleset_version || '-' }}
         </p>
@@ -16,7 +16,7 @@
         </div>
         <details v-if="rule.rationale" class="mt-2 text-xs text-slate-500">
           <summary class="cursor-pointer font-black text-blue-600">查看判定依据</summary>
-          <p class="mt-1 font-semibold leading-5">{{ rule.rationale }}</p>
+          <p class="mt-1 break-words font-semibold leading-5">{{ rule.rationale }}</p>
         </details>
       </div>
     </div>

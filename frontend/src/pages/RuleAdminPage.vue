@@ -41,7 +41,7 @@
               </div>
             </div>
 
-            <div class="divide-y divide-slate-100">
+            <div class="max-h-[calc(100vh-16rem)] divide-y divide-slate-100 overflow-y-auto">
               <article v-for="rule in visibleRules" :key="`${rule.ruleset}-${rule.name}`" class="grid gap-4 p-5 lg:grid-cols-[1fr_150px_110px] lg:items-center">
                 <div class="min-w-0">
                   <div class="flex flex-wrap items-center gap-2">
@@ -49,10 +49,12 @@
                     <span class="rounded-full px-2.5 py-1 text-[11px] font-black" :class="rule.enabled ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'">{{ rule.enabled ? '运行中' : '已停用' }}</span>
                     <span class="text-xs font-bold text-slate-400">v{{ rule.version }}</span>
                   </div>
-                  <p class="mt-2 text-sm font-bold text-slate-600">{{ rule.reason }}</p>
-                  <p class="mt-1 text-xs font-semibold leading-5 text-slate-400">{{ rule.rationale || '暂无解释依据' }}</p>
-                  <div v-if="rule.triggers?.length" class="mt-3 flex flex-wrap gap-1.5">
-                    <span v-for="trigger in rule.triggers.slice(0, 8)" :key="trigger" class="rounded-lg bg-slate-100 px-2 py-1 text-xs font-bold text-slate-500">{{ trigger }}</span>
+                  <p class="mt-2 break-words text-sm font-bold text-slate-600">{{ rule.reason }}</p>
+                  <p class="mt-1 max-h-24 overflow-y-auto break-words text-xs font-semibold leading-5 text-slate-400">{{ rule.rationale || '暂无解释依据' }}</p>
+                  <div v-if="rule.triggers?.length" class="mt-3 max-h-24 overflow-y-auto pr-1">
+                    <div class="flex flex-wrap gap-1.5">
+                      <span v-for="trigger in rule.triggers.slice(0, 8)" :key="trigger" class="rounded-lg bg-slate-100 px-2 py-1 text-xs font-bold text-slate-500">{{ trigger }}</span>
+                    </div>
                   </div>
                 </div>
                 <label class="block">

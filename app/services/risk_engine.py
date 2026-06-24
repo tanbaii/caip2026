@@ -124,10 +124,42 @@ _DEFAULT_URL_RULES = {
     "score_levels": {"critical": 70, "high": 40, "medium": 20, "low": 0},
 }
 
+def _load_packaged_default(path: Path, fallback: dict, label: str) -> dict:
+    """Use the packaged JSON as the default snapshot, with code defaults as emergency fallback."""
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+        if not isinstance(data, dict):
+            raise ValueError("top-level value must be an object")
+        return data
+    except (json.JSONDecodeError, ValueError, OSError) as exc:
+        logger.error(
+            "Packaged %s rules unavailable (%s); using emergency in-code fallback",
+            label,
+            exc,
+        )
+        return fallback
+
+
+_DEFAULT_RISK_RULES = _load_packaged_default(
+    _DATA_DIR / "risk_rules.json",
+    _DEFAULT_RISK_RULES,
+    "text",
+)
+_DEFAULT_TEXT_RULES = _DEFAULT_RISK_RULES["text_rules"]
+_DEFAULT_URL_RULES = _load_packaged_default(
+    _DATA_DIR / "url_rules.json",
+    _DEFAULT_URL_RULES,
+    "URL",
+)
+
 def _load_json(path: Path, fallback: dict) -> dict:
     """Load a JSON config file; return *fallback* if the file is missing or broken."""
     if not path.exists():
-        logger.warning("Config file not found: %s -- using built-in defaults", path)
+        logger.warning(
+            "FALLBACK MODE: Config file not found: %s -- using built-in defaults",
+            path,
+        )
         return fallback
     try:
         with open(path, encoding="utf-8") as fh:
@@ -136,7 +168,11 @@ def _load_json(path: Path, fallback: dict) -> dict:
             raise ValueError("top-level value must be an object")
         return data
     except (json.JSONDecodeError, ValueError, OSError) as exc:
-        logger.warning("Failed to parse %s (%s) -- using built-in defaults", path, exc)
+        logger.warning(
+            "FALLBACK MODE: Failed to parse %s (%s) -- using built-in defaults",
+            path,
+            exc,
+        )
         return fallback
 
 
@@ -195,6 +231,7 @@ class RiskEngine:
 
         cls._validate_rule_list(risk_cfg["text_rules"], "文本")
         cls._validate_rule_list(url_cfg["checks"], "URL", require_triggers=False)
+        cls._warn_default_rule_drift(risk_cfg)
 
         supported_conditions = {
             "missing_protocol", "ip_direct", "at_symbol", "punycode",
@@ -245,6 +282,37 @@ class RiskEngine:
                     isinstance(item, str) and item.strip() for item in triggers
                 ):
                     raise ValueError(f"文本规则 {name} 至少需要一个有效触发词")
+            compound_groups = rule.get("compound_groups")
+            if compound_groups is not None:
+                if not isinstance(compound_groups, list) or not compound_groups:
+                    raise ValueError(f"文本规则 {name} 的 compound_groups 必须是非空列表")
+                for group in compound_groups:
+                    terms = group.get("terms") if isinstance(group, dict) else None
+                    if not isinstance(terms, list) or not terms or not all(
+                        isinstance(item, str) and item.strip() for item in terms
+                    ):
+                        raise ValueError(f"文本规则 {name} 的组合触发组必须包含有效 terms")
+
+    @staticmethod
+    def _warn_default_rule_drift(risk_cfg: dict[str, Any]) -> None:
+        configured_ids = {
+            str(rule.get("name", "")).strip()
+            for rule in risk_cfg.get("text_rules", [])
+            if str(rule.get("name", "")).strip()
+        }
+        default_ids = {
+            str(rule.get("name", "")).strip()
+            for rule in _DEFAULT_TEXT_RULES
+            if str(rule.get("name", "")).strip()
+        }
+        if configured_ids != default_ids:
+            logger.warning(
+                "Default text rule ids differ from loaded config: missing_in_config=%s extra_in_config=%s default_count=%s config_count=%s",
+                sorted(default_ids - configured_ids),
+                sorted(configured_ids - default_ids),
+                len(default_ids),
+                len(configured_ids),
+            )
 
     @classmethod
     def _build_runtime(
@@ -318,11 +386,7 @@ class RiskEngine:
         for rule in self.rules:
             if not rule.get("enabled", True):
                 continue
-            hits = self.effective_terms(
-                text,
-                rule.get("triggers", []),
-                negation_exempt=rule.get("name") in exempt_rules,
-            )
+            hits = self._match_text_rule(text, rule, rule.get("name") in exempt_rules)
             if hits:
                 text_score += int(rule["weight"])
                 reasons.append(str(rule["reason"]))
@@ -386,6 +450,41 @@ class RiskEngine:
             },
             "ruleset_version": self.risk_ruleset_version,
         }
+
+    def _match_text_rule(
+        self,
+        text: str,
+        rule: dict[str, Any],
+        negation_exempt: bool,
+    ) -> list[str]:
+        hits: list[str] = []
+        if rule.get("trigger_mode") != "compound_only":
+            hits = self.effective_terms(
+                text,
+                rule.get("triggers", []),
+                negation_exempt=negation_exempt,
+            )
+
+        compound_groups = rule.get("compound_groups")
+        if isinstance(compound_groups, list) and compound_groups:
+            grouped_hits: list[str] = []
+            for group in compound_groups:
+                if not isinstance(group, dict):
+                    grouped_hits = []
+                    break
+                terms = group.get("terms", [])
+                group_hits = self.effective_terms(
+                    text,
+                    terms,
+                    negation_exempt=negation_exempt,
+                )
+                if not group_hits:
+                    grouped_hits = []
+                    break
+                grouped_hits.extend(group_hits)
+            hits.extend(grouped_hits)
+
+        return list(dict.fromkeys(hits))
 
     def evaluate_url(self, url: str) -> dict[str, object]:
         cfg = self._url_cfg

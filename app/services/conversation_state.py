@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Hashable
 
 from app.services.text_semantics import find_effective_terms
 
@@ -421,19 +421,19 @@ class ConversationState:
 
 class ConversationStateManager:
     def __init__(self) -> None:
-        self._states: dict[int, ConversationState] = {}
+        self._states: dict[Hashable, ConversationState] = {}
 
-    def get_state(self, user_id: int) -> ConversationState:
+    def get_state(self, user_id: Hashable) -> ConversationState:
         if user_id not in self._states:
             self._states[user_id] = ConversationState()
         return self._states[user_id]
 
-    def reset(self, user_id: int) -> None:
+    def reset(self, user_id: Hashable) -> None:
         self._states.pop(user_id, None)
 
     def update_and_get(
         self,
-        user_id: int,
+        user_id: Hashable,
         message: str,
         risk_level: str,
         intent: str,
@@ -461,14 +461,14 @@ class ConversationStateManager:
         state.pending_questions = _compute_follow_ups(state)
         return state.as_dict()
 
-    def recompute_stage(self, user_id: int, risk_level: str) -> dict[str, Any]:
+    def recompute_stage(self, user_id: Hashable, risk_level: str) -> dict[str, Any]:
         state = self.get_state(user_id)
         state.last_risk_level = risk_level
         state.session_stage = _determine_stage(state, risk_level)
         state.pending_questions = _compute_follow_ups(state)
         return state.as_dict()
 
-    def compute_conversation_bonus(self, user_id: int) -> tuple[int, list[dict[str, Any]], list[str]]:
+    def compute_conversation_bonus(self, user_id: Hashable) -> tuple[int, list[dict[str, Any]], list[str]]:
         state = self.get_state(user_id)
         facts = state.known_facts
         if state.turn_count <= 1:
